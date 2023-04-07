@@ -1,0 +1,10 @@
+name: corlab
+channels:
+  - defaults
+dependencies:
+  - r-base
+  - r-essentials
+  - r-ranger
+  - pandas
+  - matplotlib
+  - seaborn

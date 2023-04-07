@@ -11,6 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
+
 def run(response_path, feature_dir, output_dir, config_path):
     # load data
     logger.info("Loading response data...")
@@ -35,9 +36,10 @@ def run(response_path, feature_dir, output_dir, config_path):
         response_set=response_set,
         feature_set=feature_set,
         config=config,
-        output_dir=output_dir
+        output_dir=output_dir,
     )
     logger.info("done")
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -46,6 +48,7 @@ def parse_args():
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--config_path", type=str, required=False, default=None)
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()

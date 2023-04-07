@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import List, Union, Literal
 
+
 class AttrDict(dict):
     def __getattr__(self, name):
         try:
@@ -11,7 +12,7 @@ class AttrDict(dict):
                 return value
         except KeyError:
             raise AttributeError(f"'{name}' is not a valid attribute")
-            
+
 
 # pydantic model for configuration
 class RandomForestConfig(BaseModel):

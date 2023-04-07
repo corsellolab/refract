@@ -8,9 +8,10 @@ from utils import RandomForestConfig
 
 logger = logging.getLogger(__name__)
 
+
 class RFBaseTrainer:
-    """Base trainer for RF model
-    """
+    """Base trainer for RF model"""
+
     def train(self, feature_set, response_set, output_dir, config=RandomForestConfig):
         rf = RandomForestRegressor(
             n_estimators=config.n_estimators,
@@ -19,8 +20,8 @@ class RFBaseTrainer:
             min_samples_leaf=config.min_samples_leaf,
             bootstrap=config.bootstrap,
             oob_score=config.oob_score,
-            n_jobs=config.n_jobs,   
-            random_state=config.random_state
+            n_jobs=config.n_jobs,
+            random_state=config.random_state,
         )
 
         # get all unique runs
@@ -39,7 +40,12 @@ class RFBaseTrainer:
                 pert_name = run["pert_name"]
                 pert_mfc_id = run["pert_mfc_id"]
                 dose = run["dose"]
-                logger.info("    Training model for run %s, %s, %s", pert_name, pert_mfc_id, dose)
+                logger.info(
+                    "    Training model for run %s, %s, %s",
+                    pert_name,
+                    pert_mfc_id,
+                    dose,
+                )
 
                 # get features and response
                 X, y = response_set.get_joined_features(
@@ -47,14 +53,16 @@ class RFBaseTrainer:
                     pert_mfc_id=pert_mfc_id,
                     dose=dose,
                     feature_set=feature_set,
-                    feature_name=feature_name
+                    feature_name=feature_name,
                 )
                 y = y.values.ravel()
                 rf.fit(X, y)
-                
+
                 # get the feature importances
-                importances = pd.DataFrame(rf.feature_importances_, index=X.columns, columns=['importance'])
-                importances = importances.sort_values(by='importance', ascending=False)
+                importances = pd.DataFrame(
+                    rf.feature_importances_, index=X.columns, columns=["importance"]
+                )
+                importances = importances.sort_values(by="importance", ascending=False)
 
                 # add data to the imp table
                 importances["pert_name"] = pert_name
@@ -72,21 +80,25 @@ class RFBaseTrainer:
                 mse_se = mse / len(y_true)
                 r2 = rf.score(X, y)
                 pearson = np.corrcoef(y_true, y_pred)[0, 1]
-                model_stats.append({
-                    "pert_name": pert_name,
-                    "pert_mfc_id": pert_mfc_id,
-                    "dose": dose,
-                    "feature_name": feature_name,
-                    "mse": mse,
-                    "mse_se": mse_se,
-                    "r2": r2,
-                    "pearson": pearson
-                })
+                model_stats.append(
+                    {
+                        "pert_name": pert_name,
+                        "pert_mfc_id": pert_mfc_id,
+                        "dose": dose,
+                        "feature_name": feature_name,
+                        "mse": mse,
+                        "mse_se": mse_se,
+                        "r2": r2,
+                        "pearson": pearson,
+                    }
+                )
 
                 # save feature importance output
                 if not os.path.exists(f"{output_dir}/{pert_name}_{feature_name}"):
                     os.makedirs(f"{output_dir}/{pert_name}_{feature_name}")
-                importances.to_csv(f"{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.csv")
+                importances.to_csv(
+                    f"{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.csv"
+                )
 
         # save model stats
         model_stats = pd.DataFrame(model_stats)

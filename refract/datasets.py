@@ -3,7 +3,7 @@ import re
 import logging
 from sklearn.decomposition import PCA
 from utils import AttrDict
-from typing import Tuple
+from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,6 @@ class FeatureSet:
         selected_PCs = pca.components_[pca.explained_variance_ > 0.2]
         LIN_PCs = self.feature_tables["LIN"] @ selected_PCs.T
         self.feature_tables["LIN_PCs"] = LIN_PCs
-
 
 class ResponseSet:
     """Response data"""

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
-from typing import List, Union, Literal
+from typing import List, Union, Literal, Dict
+import pandas as pd
+import numpy as np
 
 
 class AttrDict(dict):
@@ -27,3 +29,17 @@ class RandomForestConfig(BaseModel):
     random_state: int = 42
     # train config
     feature_name_list: List[str] = ["X_all", "X_ccle"]
+
+class RandomForestCVConfig(RandomForestConfig):
+    # only use all features
+    feature_name_list: List[str] = ["X_all"]
+    # CV Grid search params
+    param_grid: Dict[str, List] = {
+        "n_estimators": [50, 100, 200],
+        "max_depth": [None, 5, 10, 40],
+        "min_samples_split": [5, 10, 50],
+    }
+    # CV details
+    n_folds: int = 5
+    n_jobs: int = 12
+    random_state: int = 42

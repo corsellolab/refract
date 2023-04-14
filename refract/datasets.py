@@ -104,6 +104,7 @@ class FeatureSet:
         LIN_PCs = self.feature_tables["LIN"] @ selected_PCs.T
         self.feature_tables["LIN_PCs"] = LIN_PCs
 
+
 class ResponseSet:
     """Response data"""
 

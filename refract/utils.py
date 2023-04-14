@@ -30,6 +30,7 @@ class RandomForestConfig(BaseModel):
     # train config
     feature_name_list: List[str] = ["X_all", "X_ccle"]
 
+
 class RandomForestCVConfig(RandomForestConfig):
     # only use all features
     feature_name_list: List[str] = ["X_all"]

@@ -8,7 +8,6 @@ import pickle
 from typing import List, Dict
 from utils import RandomForestConfig, RandomForestCVConfig
 from sklearn.model_selection import KFold
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.metrics import mean_squared_error, make_scorer, r2_score
 
@@ -157,7 +156,7 @@ class NestedCVRFTrainer:
                 cv_results = self._train_nested_cv(X, y, config)
                 # get feature importances
                 logger.info("Computing feature importances...")
-                importances = self._compute_cv_feature_importances(cv_results)
+                importances = self._compute_cv_feature_importances(X, cv_results)
 
                 # add data to the imp table
                 importances["pert_name"] = pert_name
@@ -170,9 +169,7 @@ class NestedCVRFTrainer:
 
                 # get model stats
                 logger.info("Computing model stats...")
-                model_stats.append(
-                    self._compute_cv_model_performance(X, y, cv_results)
-                )
+                model_stats.append(self._compute_cv_model_performance(X, y, cv_results))
 
                 # save feature importance output
                 if not os.path.exists(f"{output_dir}/{pert_name}_{feature_name}"):
@@ -182,7 +179,10 @@ class NestedCVRFTrainer:
                 )
 
                 # save cv_results
-                with open("{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.pkl", "wb") as f:
+                with open(
+                    "{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.pkl",
+                    "wb",
+                ) as f:
                     pickle.dump(cv_results, f)
 
         # save model stats
@@ -193,14 +193,15 @@ class NestedCVRFTrainer:
         with open(f"{output_dir}/config.json", "w") as f:
             json.dump(config.__dict__, f)
 
-
     def _train_nested_cv(self, X, y, config):
         """Perform nested cross validation training for RF model"""
-        kf_outer = KFold(n_splits=config.n_splits, shuffle=True, random_state=config.random_state)
+        kf_outer = KFold(
+            n_splits=config.n_splits, shuffle=True, random_state=config.random_state
+        )
         mse_scorer = make_scorer(mean_squared_error, greater_is_better=False)
 
         cv_results = []
-        for train_val_index, test_index in kf_outer.split(X,y):
+        for train_val_index, test_index in kf_outer.split(X, y):
             X_train_val, X_test = X.iloc[train_val_index], X.iloc[test_index]
             y_train_val, y_test = y[train_val_index], y[test_index]
             y_train_val = y_train_val.ravel()
@@ -223,7 +224,7 @@ class NestedCVRFTrainer:
                 scoring=mse_scorer,
                 n_jobs=config.n_jobs,
                 verbose=1,
-                refit=True
+                refit=True,
             )
 
             # fit the grid search model
@@ -234,7 +235,9 @@ class NestedCVRFTrainer:
             best_params = grid.best_params_
 
             # get the train_val score
-            train_val_mse = mean_squared_error(best_model.predict(X_train_val), y_train_val)
+            train_val_mse = mean_squared_error(
+                best_model.predict(X_train_val), y_train_val
+            )
             # get the test score
             test_mse = mean_squared_error(best_model.predict(X_test), y_test)
 
@@ -250,12 +253,12 @@ class NestedCVRFTrainer:
 
         return cv_results
 
-
-    def _compute_cv_feature_importances(self, cv_results: List[Dict]):
-        """Compute the feature importances from a list of CV results. 
+    def _compute_cv_feature_importances(self, X: pd.DataFrame, cv_results: List[Dict]):
+        """Compute the feature importances from a list of CV results.
         cv_results is the output of _train_nested_cv
 
         Args:
+            X (pd.DataFrame): Feature dataframe
             cv_results (List[Dict]): Output of _train_nested_cv
 
         Returns:
@@ -271,14 +274,20 @@ class NestedCVRFTrainer:
             )
             fold_importance.append(importances)
 
-        # get the mean feature importance 
+        # get the mean feature importance
         merged_df = pd.concat(fold_importance)
         average_df = merged_df.groupby(merged_df.index).agg({"importance": "mean"})
-        result_df = merged_df.drop("importance", axis=1).drop_duplicates().join(average_df, left_index=True, right_index=True)
+        result_df = (
+            merged_df.drop("importance", axis=1)
+            .drop_duplicates()
+            .join(average_df, left_index=True, right_index=True)
+        )
         return result_df
 
-    def _compute_cv_model_performance(X: pd.DataFrame, y: np.array, cv_results: List[Dict]):
-        """Compute the model performance from a list of CV results. 
+    def _compute_cv_model_performance(
+        X: pd.DataFrame, y: np.array, cv_results: List[Dict]
+    ):
+        """Compute the model performance from a list of CV results.
         cv_results is the output of _train_nested_cv
 
         Args:
@@ -306,11 +315,6 @@ class NestedCVRFTrainer:
         mse = mean_squared_error(y_true_all, y_pred_all)
         mse_se = mse / np.sqrt(len(y_true_all))
         r2 = r2_score(y_true_all, y_pred_all)
-        pearson = np.corrcoef(y_true_all, y_pred_all)[0,1]
-        model_stats = {
-            "mse": mse,
-            "mse_se": mse_se,
-            "r2": r2,
-            "pearson": pearson
-        }
+        pearson = np.corrcoef(y_true_all, y_pred_all)[0, 1]
+        model_stats = {"mse": mse, "mse_se": mse_se, "r2": r2, "pearson": pearson}
         return model_stats

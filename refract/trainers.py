@@ -149,10 +149,6 @@ class NestedCVRFTrainer:
                     feature_set=feature_set,
                     feature_name=feature_name,
                 )
-                # REMOVE THIS !!!!
-                # DEV: get only the first 50 cols of X
-                X = X.iloc[:, :50]
-                # !!!!!!!!!!!!!!!!
                 y = y.values.ravel()
 
                 # perform nested cross validation

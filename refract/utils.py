@@ -28,12 +28,12 @@ class RandomForestConfig(BaseModel):
     n_jobs: int = 8
     random_state: int = 42
     # train config
-    feature_name_list: List[str] = ["X_all", "X_ccle"]
+    feature_name_list: List[str] = ["all", "ccle"]
 
 
 class RandomForestCVConfig(RandomForestConfig):
     # only use all features
-    feature_name_list: List[str] = ["X_all"]
+    feature_name_list: List[str] = ["all"]
     # CV Grid search params
     param_grid: Dict[str, List] = {
         "n_estimators": [50, 100, 200],
@@ -41,6 +41,6 @@ class RandomForestCVConfig(RandomForestConfig):
         "min_samples_split": [5, 10, 50],
     }
     # CV details
-    n_folds: int = 5
+    n_splits: int = 5
     n_jobs: int = 12
     random_state: int = 42

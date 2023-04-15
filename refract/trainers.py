@@ -149,6 +149,10 @@ class NestedCVRFTrainer:
                     feature_set=feature_set,
                     feature_name=feature_name,
                 )
+                # REMOVE THIS !!!!
+                # DEV: get only the first 50 cols of X
+                X = X.iloc[:, :50]
+                # !!!!!!!!!!!!!!!!
                 y = y.values.ravel()
 
                 # perform nested cross validation
@@ -169,7 +173,12 @@ class NestedCVRFTrainer:
 
                 # get model stats
                 logger.info("Computing model stats...")
-                model_stats.append(self._compute_cv_model_performance(X, y, cv_results))
+                model_stat = self._compute_cv_model_performance(X, y, cv_results)
+                model_stat["pert_name"] = pert_name
+                model_stat["pert_mfc_id"] = pert_mfc_id
+                model_stat["dose"] = dose
+                model_stat["feature_name"] = feature_name
+                model_stats.append(model_stat)
 
                 # save feature importance output
                 if not os.path.exists(f"{output_dir}/{pert_name}_{feature_name}"):
@@ -180,7 +189,7 @@ class NestedCVRFTrainer:
 
                 # save cv_results
                 with open(
-                    "{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.pkl",
+                    f"{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(cv_results, f)
@@ -275,17 +284,14 @@ class NestedCVRFTrainer:
             fold_importance.append(importances)
 
         # get the mean feature importance
-        merged_df = pd.concat(fold_importance)
-        average_df = merged_df.groupby(merged_df.index).agg({"importance": "mean"})
-        result_df = (
-            merged_df.drop("importance", axis=1)
-            .drop_duplicates()
-            .join(average_df, left_index=True, right_index=True)
+        importance = (
+            pd.concat(fold_importance, axis=1).mean(axis=1).sort_values(ascending=False)
         )
-        return result_df
+        importance = pd.DataFrame(importance, columns=["importance"])
+        return importance
 
     def _compute_cv_model_performance(
-        X: pd.DataFrame, y: np.array, cv_results: List[Dict]
+        self, X: pd.DataFrame, y: np.array, cv_results: List[Dict]
     ):
         """Compute the model performance from a list of CV results.
         cv_results is the output of _train_nested_cv
@@ -308,8 +314,8 @@ class NestedCVRFTrainer:
             rf = cv_fold["best_model"]
             y_pred = rf.predict(X_test)
 
-            y_pred_all.append(y_pred)
-            y_true_all.append(y_true)
+            y_pred_all.extend(y_pred)
+            y_true_all.extend(y_true)
 
         # get the performance metrics
         mse = mean_squared_error(y_true_all, y_pred_all)

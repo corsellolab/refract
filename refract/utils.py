@@ -36,11 +36,13 @@ class RandomForestCVConfig(RandomForestConfig):
     feature_name_list: List[str] = ["all"]
     # CV Grid search params
     param_grid: Dict[str, List] = {
-        "n_estimators": [50, 100, 200],
-        "max_depth": [None, 5, 10, 40],
-        "min_samples_split": [5, 10, 50],
+        "n_estimators": [
+            100,
+        ],
+        "max_depth": [1, 2, 3, 5],
+        "min_samples_split": [2, 5, 10],
     }
     # CV details
     n_splits: int = 5
-    n_jobs: int = 12
+    n_jobs: int = 10
     random_state: int = 42

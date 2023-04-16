@@ -25,7 +25,7 @@ class RandomForestConfig(BaseModel):
     min_samples_leaf: int = 1
     bootstrap: bool = True
     oob_score: bool = False
-    n_jobs: int = 8
+    n_jobs: int = 10
     random_state: int = 42
     # train config
     feature_name_list: List[str] = ["all", "ccle"]
@@ -36,11 +36,12 @@ class RandomForestCVConfig(RandomForestConfig):
     feature_name_list: List[str] = ["all"]
     # CV Grid search params
     param_grid: Dict[str, List] = {
-        "n_estimators": [5, 10],
-        "max_depth": [2, 5],
-        "min_samples_split": [2, 5],
+        "n_estimators": [5, 10, 25, 50],
+        "max_depth": [2, 3, 5, 10],
+        "max_features": [
+            1.0,
+        ],
     }
     # CV details
     n_splits: int = 5
-    n_jobs: int = 10
     random_state: int = 42

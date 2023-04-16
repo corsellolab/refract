@@ -290,7 +290,7 @@ class NestedCVRFTrainer:
                     "train_val_index": train_val_index,
                     "test_index": test_index,
                     "models": [x["model"] for x in inner_cv_results],
-                    "params": [x["params"] for x in inner_cv_results],
+                    "best_params": [x["params"] for x in inner_cv_results],
                     "train_mse": np.mean([x["train_mse"] for x in inner_cv_results]),
                     "val_mse": np.mean([x["val_mse"] for x in inner_cv_results]),
                     "test_mse": np.mean(
@@ -348,8 +348,9 @@ class NestedCVRFTrainer:
         importance["pert_name"] = pert_name
         importance["pert_mfc_id"] = pert_mfc_id
         importance["dose"] = dose
-        importance["feature_name"] = feature_name
+        importance["feature_set"] = feature_name
         importance["rank"] = importance["importance"].rank(ascending=False).astype(int)
+        importance.index.rename("feature", inplace=True)
 
         return importance
 

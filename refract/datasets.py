@@ -3,7 +3,7 @@ import re
 import logging
 from sklearn.decomposition import PCA
 from utils import AttrDict
-from typing import Tuple
+from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
 

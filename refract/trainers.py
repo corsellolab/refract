@@ -6,11 +6,12 @@ import numpy as np
 import json
 import pickle
 from typing import List, Dict
-from utils import RandomForestConfig, RandomForestCVConfig
+from utils import RandomForestConfig, RandomForestCVConfig, XGBoostCVConfig
 from sklearn.model_selection import KFold
 from sklearn.model_selection import ParameterGrid
 from sklearn.metrics import mean_squared_error, r2_score
 from tqdm import tqdm
+from xgboost import XGBRegressor
 
 logger = logging.getLogger(__name__)
 
@@ -409,3 +410,18 @@ class NestedCVRFTrainer:
         model_stats["dose"] = dose
         model_stats["feature_name"] = feature_name
         return model_stats
+
+
+class NestedCVXGBoostTrainer(NestedCVRFTrainer):
+    def train(self, *args, **kwargs):
+        kwargs["model"] = XGBRegressor
+        super().train(*args, **kwargs)
+
+    def _init_model(self, model, config):
+        """Initialize the RF model"""
+        return model(
+            n_estimators=config.n_estimators,
+            max_depth=config.max_depth,
+            random_state=config.random_state,
+            n_jobs=config.n_jobs,
+        )

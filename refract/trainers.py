@@ -159,9 +159,6 @@ class NestedCVRFTrainer:
                 )
                 y = y.values.ravel()
 
-                # TODO: REMOVE
-                X = X.iloc[:, :50]
-
                 # perform nested cross validation
                 logger.info("Training nested cross validation...")
                 cv_results = self._train_nested_cv(X, y, model, config)

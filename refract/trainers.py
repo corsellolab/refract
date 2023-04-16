@@ -159,21 +159,22 @@ class NestedCVRFTrainer:
                 )
                 y = y.values.ravel()
 
+                # TODO: REMOVE
+                X = X.iloc[:, :50]
+
                 # perform nested cross validation
                 logger.info("Training nested cross validation...")
-                cv_results = self._train_nested_cv(
+                cv_results = self._train_nested_cv(X, y, model, config)
+                # get feature importances
+                logger.info("Computing feature importances...")
+                importances = self._compute_cv_feature_importances(
                     X,
-                    y,
-                    model,
-                    config,
+                    cv_results,
                     pert_name=pert_name,
                     pert_mfc_id=pert_mfc_id,
                     dose=dose,
                     feature_name=feature_name,
                 )
-                # get feature importances
-                logger.info("Computing feature importances...")
-                importances = self._compute_cv_feature_importances(X, cv_results)
 
                 # get model stats
                 logger.info("Computing model stats...")
@@ -205,7 +206,7 @@ class NestedCVRFTrainer:
 
         # save model stats
         model_stats = pd.DataFrame(model_stats)
-        model_stats.to_csv(f"{output_dir}/Model_table.csv")
+        model_stats.to_csv(f"{output_dir}/Model_table.csv", index=False)
 
         # save config
         with open(f"{output_dir}/config.json", "w") as f:
@@ -268,7 +269,7 @@ class NestedCVRFTrainer:
                     # fit the model
                     cv_model.fit(X_train, y_train)
                     # get the scores
-                    train_mse = mean_squared_error(cv_model.predict(X_train), y_val)
+                    train_mse = mean_squared_error(cv_model.predict(X_train), y_train)
                     val_mse = mean_squared_error(cv_model.predict(X_val), y_val)
                     # save the results
                     grid_search_results.append(
@@ -351,7 +352,7 @@ class NestedCVRFTrainer:
         importance["pert_mfc_id"] = pert_mfc_id
         importance["dose"] = dose
         importance["feature_name"] = feature_name
-        importances["rank"] = importances["importance"].rank(ascending=False)
+        importance["rank"] = importance["importance"].rank(ascending=False).astype(int)
 
         return importance
 

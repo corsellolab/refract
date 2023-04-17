@@ -53,3 +53,11 @@ class XGBoostCVConfig(RandomForestCVConfig):
         "n_estimators": [5, 10, 25, 50],
         "max_depth": [2, 3, 5, 10],
     }
+
+
+class LGBMCVConfig(RandomForestCVConfig):
+    param_grid: Dict[str, List] = {
+        "num_leaves": [4, 32, 64],
+        "max_depth": [2, 4, 8],
+    }
+    n_jobs: int = 10

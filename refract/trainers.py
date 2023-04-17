@@ -12,6 +12,7 @@ from sklearn.model_selection import ParameterGrid
 from sklearn.metrics import mean_squared_error, r2_score
 from tqdm import tqdm
 from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
 
 logger = logging.getLogger(__name__)
 
@@ -425,3 +426,20 @@ class NestedCVXGBoostTrainer(NestedCVRFTrainer):
             random_state=config.random_state,
             n_jobs=config.n_jobs,
         )
+
+
+class NestedCVLGBMTrainer(NestedCVRFTrainer):
+    def train(self, *args, **kwargs):
+        kwargs["model"] = LGBMRegressor
+        super().train(*args, **kwargs)
+
+    def _init_model(self, model, config):
+        """Initialize the RF model"""
+        return model(n_jobs=config.n_jobs, random_state=config.random_state)
+
+    def _train_nested_cv(self, X, y, model, config):
+        # replace JSON special characters in the feature names
+        # see: https://github.com/autogluon/autogluon/issues/399
+        for char in ["'", '"', ":", ",", "{", "}", "[", "]"]:
+            X.columns = X.columns.str.replace(char, "_")
+        return super()._train_nested_cv(X, y, model, config)

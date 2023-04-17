@@ -45,3 +45,19 @@ class RandomForestCVConfig(RandomForestConfig):
     # CV details
     n_splits: int = 5
     random_state: int = 42
+
+
+class XGBoostCVConfig(RandomForestCVConfig):
+    n_jobs: int = 10
+    param_grid: Dict[str, List] = {
+        "n_estimators": [5, 10, 25, 50],
+        "max_depth": [2, 3, 5, 10],
+    }
+
+
+class LGBMCVConfig(RandomForestCVConfig):
+    param_grid: Dict[str, List] = {
+        "num_leaves": [4, 32, 64],
+        "max_depth": [2, 4, 8],
+    }
+    n_jobs: int = 10

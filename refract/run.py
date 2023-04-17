@@ -2,8 +2,13 @@
 """
 import os
 from datasets import ResponseSet, FeatureSet
-from trainers import RFBaseTrainer, NestedCVRFTrainer
-from utils import RandomForestCVConfig
+from trainers import (
+    RFBaseTrainer,
+    NestedCVRFTrainer,
+    NestedCVXGBoostTrainer,
+    NestedCVLGBMTrainer,
+)
+from utils import RandomForestCVConfig, XGBoostCVConfig, LGBMCVConfig
 import json
 import argparse
 import logging
@@ -25,12 +30,12 @@ def run(response_path, feature_dir, output_dir, config_path):
     if config_path:
         with open(config_path, "r") as f:
             config = json.load(f)
-        config = RandomForestCVConfig(**config)
+        config = LGBMCVConfig(**config)
     else:
-        config = RandomForestCVConfig()
+        config = LGBMCVConfig()
 
     # train model
-    trainer = NestedCVRFTrainer()
+    trainer = NestedCVLGBMTrainer()
     logger.info("Training model...")
     trainer.train(
         response_set=response_set,

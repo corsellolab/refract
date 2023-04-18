@@ -13,6 +13,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 from tqdm import tqdm
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
+from sklearn.impute import SimpleImputer
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,12 @@ class NestedCVRFTrainer:
                 )
                 y_train, y_val = y_train_val[train_index], y_train_val[val_index]
 
+                imputer = SimpleImputer(strategy="median")
+                logger.info("Imputing missing values...")
+                logger.info("    imputation strategy: median")
+                X_train = imputer.fit_transform(X_train)
+                X_val = imputer.transform(X_val)
+
                 grid_search_results = []
                 for params in tqdm(param_grid):
                     # set the model parameters
@@ -279,6 +286,7 @@ class NestedCVRFTrainer:
                             "train_mse": train_mse,
                             "val_mse": val_mse,
                             "model": cv_model,
+                            "imputer": imputer,
                         }
                     )
                 # select the dictionary of the best model in the inner loop
@@ -292,12 +300,16 @@ class NestedCVRFTrainer:
                     "train_val_index": train_val_index,
                     "test_index": test_index,
                     "models": [x["model"] for x in inner_cv_results],
+                    "imputers": [x["imputer"] for x in inner_cv_results],
                     "best_params": [x["params"] for x in inner_cv_results],
                     "train_mse": np.mean([x["train_mse"] for x in inner_cv_results]),
                     "val_mse": np.mean([x["val_mse"] for x in inner_cv_results]),
                     "test_mse": np.mean(
                         [
-                            mean_squared_error(x["model"].predict(X_test), y_test)
+                            mean_squared_error(
+                                x["model"].predict(x["imputer"].transform(X_test)),
+                                y_test,
+                            )
                             for x in inner_cv_results
                         ]
                     ),
@@ -389,10 +401,11 @@ class NestedCVRFTrainer:
             X_test = X.iloc[test_index]
             y_true = y[test_index]
             models = cv_fold["models"]
+            imputers = cv_fold["imputers"]
             # get predictions for all models
             individiual_model_predictions = []
-            for model in models:
-                y_pred = model.predict(X_test)
+            for idx, model in enumerate(models):
+                y_pred = model.predict(imputers[idx].transform(X_test))
                 individiual_model_predictions.append(y_pred)
             # average predictions
             y_pred = np.mean(individiual_model_predictions, axis=0)

@@ -30,12 +30,12 @@ def run(response_path, feature_dir, output_dir, config_path):
     if config_path:
         with open(config_path, "r") as f:
             config = json.load(f)
-        config = LGBMCVConfig(**config)
+        config = RandomForestCVConfig(**config)
     else:
-        config = LGBMCVConfig()
+        config = RandomForestCVConfig()
 
     # train model
-    trainer = NestedCVLGBMTrainer()
+    trainer = NestedCVRFTrainer()
     logger.info("Training model...")
     trainer.train(
         response_set=response_set,

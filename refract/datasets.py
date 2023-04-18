@@ -80,6 +80,7 @@ class FeatureSet:
         }
 
     def load_concatenated_feature_tables(self):
+        """
         X_all = pd.read_csv(f"{self.feature_dir}/x-all.csv")
         X_all = X_all.set_index(X_all.columns[0])
         X_all.index.name = "ccle_name"
@@ -95,6 +96,13 @@ class FeatureSet:
         X_ccle = X_ccle.drop_duplicates()
         X_ccle = X_ccle.loc[:, list(set(X_ccle.columns))]
         self.feature_tables["ccle"] = X_ccle
+        """
+        X_all = pd.read_pickle(f"{self.feature_dir}/x-all.pkl")
+        X_all.index.name = "ccle_name"
+        # remove duplicate rows and columns
+        X_all = X_all.drop_duplicates()
+        X_all = X_all.loc[:, list(set(X_all.columns))]
+        self.feature_tables["all"] = X_all
 
     def get_lineage_PCs(self):
         pca = PCA()

@@ -261,7 +261,7 @@ class NestedCVRFTrainer:
                 )
                 y_train, y_val = y_train_val[train_index], y_train_val[val_index]
 
-                imputer = SimpleImputer(strategy="median")
+                imputer = SimpleImputer(strategy="median", keep_empty_features=True)
                 logger.info("Imputing missing values...")
                 logger.info("    imputation strategy: median")
                 X_train = imputer.fit_transform(X_train)
@@ -345,6 +345,7 @@ class NestedCVRFTrainer:
         for cv_fold in cv_results:
             # get the models
             models = cv_fold["models"]
+
             # compute the mean feature importance
             for model in models:
                 importances = pd.DataFrame(

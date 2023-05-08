@@ -1,10 +1,19 @@
 name: corlab
 channels:
+  - conda-forge
   - defaults
 dependencies:
-  - r-base
-  - r-essentials
-  - r-ranger
-  - pandas
   - matplotlib
+  - pandas
+  - scipy
   - seaborn
+  - pip
+  - pip:
+      - lightgbm
+      - pre-commit
+      - pydantic
+      - pyyaml
+      - scikit-learn
+      - tqdm
+      - xgboost
+prefix: /home/nphillips/miniconda3/envs/corlab

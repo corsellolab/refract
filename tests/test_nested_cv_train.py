@@ -6,9 +6,7 @@ from ..refract.datasets import ResponseSet, FeatureSet
 from ..refract.trainers import NestedCVRFTrainerNoRetrain
 from ..refract.utils import RandomForestCVConfig
 
-REPO_ROOT = sys.path.append(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
-)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 
 
 class TestNestedCVNoRetrain(unittest.TestCase):
@@ -31,7 +29,11 @@ class TestNestedCVNoRetrain(unittest.TestCase):
 
     def test_run_training(self):
         # test running a quick training workflow
-        config = RandomForestCVConfig()
+        config = RandomForestCVConfig(
+            param_grid={"n_estimators": [5, 10], "max_depth": [2, 3]},
+            n_splits=4,
+            n_jobs=4,
+        )
         trainer = NestedCVRFTrainerNoRetrain(
             pert_name=self.pert_name,
             pert_mfc_id=self.pert_mfc_id,
@@ -43,3 +45,20 @@ class TestNestedCVNoRetrain(unittest.TestCase):
             config=config,
         )
         trainer.train()
+
+        # test output exists
+        output_basename = "zotarolimus_BRD-K46843573-001-01-9_2.5_all_"
+        assert os.path.exists(trainer.output_dir)
+        assert os.path.exists(trainer.output_dir + "/config.json")
+        assert os.path.exists(
+            trainer.output_dir + "/" + output_basename + "feature_importances.csv"
+        )
+        assert os.path.exists(
+            trainer.output_dir + "/" + output_basename + "model_stats.csv"
+        )
+        assert os.path.exists(
+            trainer.output_dir + "/" + output_basename + "predictions.csv"
+        )
+        assert os.path.exists(
+            trainer.output_dir + "/" + output_basename + "trainer_result.pkl"
+        )

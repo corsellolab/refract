@@ -16,4 +16,5 @@ dependencies:
       - scikit-learn
       - tqdm
       - xgboost
+      - pytest
 prefix: /home/nphillips/miniconda3/envs/corlab

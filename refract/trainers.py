@@ -6,7 +6,7 @@ import numpy as np
 import json
 import pickle
 from typing import List, Dict
-from utils import RandomForestConfig, RandomForestCVConfig, XGBoostCVConfig
+from .utils import RandomForestConfig, RandomForestCVConfig, XGBoostCVConfig
 from sklearn.model_selection import KFold
 from sklearn.model_selection import ParameterGrid
 from sklearn.metrics import mean_squared_error, r2_score
@@ -14,13 +14,14 @@ from tqdm import tqdm
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 from sklearn.impute import SimpleImputer
-from pydantic import BaseModel
-from datasets import ResponseSet, FeatureSet
+from dataclasses import dataclass, field, asdict
+from .datasets import ResponseSet, FeatureSet
 
 logger = logging.getLogger(__name__)
 
 
-class ModelStats(BaseModel):
+@dataclass
+class ModelStats:
     """Statistics for a model"""
 
     pert_name: str
@@ -33,19 +34,21 @@ class ModelStats(BaseModel):
     pearson: float
 
 
-class GridSearchResult(BaseModel):
+@dataclass
+class GridSearchResult:
     """Result of HP grid search"""
 
     train_index: np.array
     val_index: np.array
-    params: Dict
+    params: Dict[str, float]
     train_mse: float
     val_mse: float
     model: object
     imputer: object
 
 
-class CVResult(BaseModel):
+@dataclass
+class CVResult:
     """CV result for a single fold"""
 
     train_val_index: np.array
@@ -55,13 +58,14 @@ class CVResult(BaseModel):
     y_pred: np.array
     models: List[object]
     imputers: List[object]
-    best_params: List[Dict]
+    best_params: List[Dict[str, float]]
     train_mse: float
     val_mse: float
     test_mse: float
 
 
-class TrainerResult(BaseModel):
+@dataclass
+class TrainerResult:
     """Result of nested CV"""
 
     pert_name: str
@@ -69,22 +73,17 @@ class TrainerResult(BaseModel):
     dose: str
     feature_name: str
     output_dir: str
-    cv_results: List[CVResult] = []
+    cv_results: List[CVResult] = field(default_factory=list)
     model_stats: ModelStats = None
     feature_importances: pd.DataFrame = None
 
-    def save_model_stats(self, append=True):
+    def save_model_stats(self):
         """Save to model stats to file"""
         output_path = os.path.join(
             self.output_dir,
             f"{self.pert_name}_{self.pert_mfc_id}_{self.dose}_{self.feature_name}_model_stats.csv",
         )
-        if append:
-            if os.path.exists(output_path):
-                df = pd.read_csv(output_path)
-                df = df.append(self.model_stats.dict(), ignore_index=True)
-            else:
-                df = pd.DataFrame([self.model_stats.dict()])
+        df = pd.DataFrame([asdict(self.model_stats)])
         df.to_csv(output_path, index=False)
 
     def save_predictions(self):
@@ -235,7 +234,7 @@ class NestedCVRFTrainerNoRetrain:
         feature_set: FeatureSet,
         response_set: ResponseSet,
         config: RandomForestCVConfig,
-        model=RandomForestRegressor,
+        model_class=RandomForestRegressor,
     ):
         # store instance variables
         self.pert_name = pert_name
@@ -246,7 +245,7 @@ class NestedCVRFTrainerNoRetrain:
         self.feature_set = feature_set
         self.response_set = response_set
         self.config = config
-        self.model = model
+        self.model_class = model_class
 
         # create output dir
         if not os.path.exists(output_dir):
@@ -273,7 +272,7 @@ class NestedCVRFTrainerNoRetrain:
 
         # perform nested cross validation
         logger.info("Training nested cross validation...")
-        self._train_nested_cv(X, y, self.model, self.config)
+        self._train_nested_cv(X, y)
 
         # get feature importances
         logger.info("Computing feature importances...")
@@ -321,19 +320,23 @@ class NestedCVRFTrainerNoRetrain:
             random_state=config.random_state,
         )
 
-    def _train_nested_cv(self, X, y, model, config):
+    def _train_nested_cv(self, X, y):
         """Perform nested cross validation training for RF model"""
         kf_outer = KFold(
-            n_splits=config.n_splits, shuffle=True, random_state=config.random_state
+            n_splits=self.config.n_splits,
+            shuffle=True,
+            random_state=self.config.random_state,
         )
         kf_inner = KFold(
-            n_splits=config.n_splits - 1, shuffle=True, random_state=config.random_state
+            n_splits=self.config.n_splits - 1,
+            shuffle=True,
+            random_state=self.config.random_state,
         )
-        param_grid = ParameterGrid(config.param_grid)
+        param_grid = ParameterGrid(self.config.param_grid)
 
         #### OUTER LOOP ####
         for idx, (train_val_index, test_index) in enumerate(kf_outer.split(X, y)):
-            logger.info("Fitting outer fold %d/%d", idx + 1, config.n_splits)
+            logger.info("Fitting outer fold %d/%d", idx + 1, self.config.n_splits)
             X_train_val, X_test = X.iloc[train_val_index], X.iloc[test_index]
             y_train_val, y_test = y.iloc[train_val_index], y.iloc[test_index]
 
@@ -347,7 +350,7 @@ class NestedCVRFTrainerNoRetrain:
                 kf_inner.split(X_train_val, y_train_val)
             ):
                 logger.info(
-                    "    Fitting inner fold %d/%d", idx + 1, config.n_splits - 1
+                    "    Fitting inner fold %d/%d", idx + 1, self.config.n_splits - 1
                 )
                 X_train, X_val = (
                     X_train_val.iloc[train_index],
@@ -365,7 +368,7 @@ class NestedCVRFTrainerNoRetrain:
                 grid_search_results = []
                 for params in tqdm(param_grid):
                     # set the model parameters
-                    cv_model = self._init_model(model, config)
+                    cv_model = self._init_model(self.model_class, self.config)
                     cv_model.set_params(**params)
                     # fit the model
                     cv_model.fit(X_train, y_train)

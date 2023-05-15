@@ -1,14 +1,14 @@
 """Run model training
 """
 import os
-from datasets import ResponseSet, FeatureSet
-from trainers import (
+from .datasets import ResponseSet, FeatureSet
+from .trainers import (
     RFBaseTrainer,
     NestedCVRFTrainer,
     NestedCVXGBoostTrainer,
     NestedCVLGBMTrainer,
 )
-from utils import RandomForestCVConfig, XGBoostCVConfig, LGBMCVConfig
+from .utils import RandomForestCVConfig, XGBoostCVConfig, LGBMCVConfig
 import json
 import argparse
 import logging

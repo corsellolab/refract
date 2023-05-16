@@ -6,7 +6,7 @@ import numpy as np
 import json
 import pickle
 from typing import List, Dict
-from .utils import RandomForestConfig, RandomForestCVConfig, XGBoostCVConfig
+from .utils import RandomForestCVConfig
 from sklearn.model_selection import KFold
 from sklearn.model_selection import ParameterGrid, GridSearchCV, cross_val_score
 from sklearn.metrics import mean_squared_error, r2_score
@@ -120,106 +120,6 @@ class TrainerResult:
             pickle.dump(self, f)
 
 
-class RFBaseTrainer:
-    """Base trainer for RF model"""
-
-    def train(self, feature_set, response_set, output_dir, config=RandomForestConfig):
-        rf = RandomForestRegressor(
-            n_estimators=config.n_estimators,
-            max_depth=config.max_depth,
-            min_samples_split=config.min_samples_split,
-            min_samples_leaf=config.min_samples_leaf,
-            bootstrap=config.bootstrap,
-            oob_score=config.oob_score,
-            n_jobs=config.n_jobs,
-            random_state=config.random_state,
-        )
-
-        # get all unique runs
-        LFC = response_set.LFC
-        runs = LFC[["pert_name", "dose", "pert_mfc_id"]].drop_duplicates()
-        logger.info("Found %d unique runs", len(runs))
-
-        # prepare output dir
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        model_stats = []
-        for feature_name in config.feature_name_list:
-            logger.info("Using feature set: %s", feature_name)
-            for _, run in runs.iterrows():
-                pert_name = run["pert_name"]
-                pert_mfc_id = run["pert_mfc_id"]
-                dose = run["dose"]
-                logger.info(
-                    "    Training model for run %s, %s, %s",
-                    pert_name,
-                    pert_mfc_id,
-                    dose,
-                )
-
-                # get features and response
-                X, y = response_set.get_joined_features(
-                    pert_name=pert_name,
-                    pert_mfc_id=pert_mfc_id,
-                    dose=dose,
-                    feature_set=feature_set,
-                    feature_name=feature_name,
-                )
-                y = y.values.ravel()
-                rf.fit(X, y)
-
-                # get the feature importances
-                importances = pd.DataFrame(
-                    rf.feature_importances_, index=X.columns, columns=["importance"]
-                )
-                importances = importances.sort_values(by="importance", ascending=False)
-
-                # add data to the imp table
-                importances["pert_name"] = pert_name
-                importances["pert_mfc_id"] = pert_mfc_id
-                importances["dose"] = dose
-                # add rank to the improtances
-                importances["rank"] = importances["importance"].rank(ascending=False)
-                # add the feature name
-                importances["feature_name"] = feature_name
-
-                # compute MSE, MSE standard error, R2, Pearson correlation for the  model
-                y_pred = rf.predict(X)
-                y_true = y
-                mse = ((y_true - y_pred) ** 2).mean()
-                mse_se = mse / len(y_true)
-                r2 = rf.score(X, y)
-                pearson = np.corrcoef(y_true, y_pred)[0, 1]
-                model_stats.append(
-                    {
-                        "pert_name": pert_name,
-                        "pert_mfc_id": pert_mfc_id,
-                        "dose": dose,
-                        "feature_name": feature_name,
-                        "mse": mse,
-                        "mse_se": mse_se,
-                        "r2": r2,
-                        "pearson": pearson,
-                    }
-                )
-
-                # save feature importance output
-                if not os.path.exists(f"{output_dir}/{pert_name}_{feature_name}"):
-                    os.makedirs(f"{output_dir}/{pert_name}_{feature_name}")
-                importances.to_csv(
-                    f"{output_dir}/{pert_name}_{feature_name}/{pert_mfc_id}_{feature_name}_{dose}.csv"
-                )
-
-        # save model stats
-        model_stats = pd.DataFrame(model_stats)
-        model_stats.to_csv(f"{output_dir}/Model_table.csv")
-
-        # save config
-        with open(f"{output_dir}/config.json", "w") as f:
-            json.dump(config.__dict__, f)
-
-
 class NestedCVRFTrainerNoRetrain:
     """Perform nested cross validation training for RF model
     Average predictions across all models, do not retrain with all data
@@ -311,12 +211,6 @@ class NestedCVRFTrainerNoRetrain:
     def _init_model(self, model, config):
         """Initialize the RF model"""
         return model(
-            n_estimators=config.n_estimators,
-            max_depth=config.max_depth,
-            min_samples_split=config.min_samples_split,
-            min_samples_leaf=config.min_samples_leaf,
-            bootstrap=config.bootstrap,
-            oob_score=config.oob_score,
             n_jobs=config.n_jobs,
             random_state=config.random_state,
         )
@@ -514,7 +408,8 @@ class NestedCVRFTrainer(NestedCVRFTrainerNoRetrain):
         # edit params only for the model
         param_grid = {f"model__{k}": v for k, v in param_grid.items()}
 
-        for train_index, test_index in kf_outer.split(X, y):
+        for idx, (train_index, test_index) in enumerate(kf_outer.split(X, y)):
+            logger.info("Fitting outer fold %d/%d", idx + 1, self.config.n_splits)
             X_train, X_test = X.iloc[train_index], X.iloc[test_index]
             y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
@@ -529,7 +424,14 @@ class NestedCVRFTrainer(NestedCVRFTrainerNoRetrain):
                     ("model", model),
                 ]
             )
-            clf = GridSearchCV(pipe, param_grid, cv=kf_inner, scoring="r2", n_jobs=-1)
+            clf = GridSearchCV(
+                pipe,
+                param_grid,
+                cv=kf_inner,
+                scoring="neg_mean_squared_error",
+                n_jobs=self.config.cv_n_jobs,
+                verbose=10,
+            )
             clf.fit(X_train, y_train.values.ravel())
 
             # get the best model
@@ -567,6 +469,35 @@ class NestedCVRFTrainer(NestedCVRFTrainerNoRetrain):
                 test_mse=test_mse,
             )
             self.trainer_result.cv_results.append(cv_result)
+
+
+class WeightedRFRegressor(RandomForestRegressor):
+    def __init__(
+        self,
+        alpha=1,
+        max_depth=3,
+        n_estimators=100,
+        n_jobs=1,
+        random_state=42,
+        max_features=1.0,
+    ):
+        super().__init__(
+            max_depth=max_depth,
+            n_estimators=n_estimators,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            max_features=max_features,
+        )
+        self.alpha = alpha
+
+    def fit(self, X, y):
+        sw = (self.alpha * y) ** 2
+        return super().fit(X, y, sample_weight=sw)
+
+
+class WeightedNestedCVRFTrainer(NestedCVRFTrainer):
+    def _init_model(self, _, config):
+        return super()._init_model(WeightedRFRegressor, config)
 
 
 class NestedCVXGBoostTrainer(NestedCVRFTrainer):

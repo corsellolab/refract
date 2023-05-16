@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Union, Dict
+from typing import List, Dict
 
 
 class AttrDict(dict):
@@ -14,28 +14,13 @@ class AttrDict(dict):
             raise AttributeError(f"'{name}' is not a valid attribute")
 
 
-# pydantic model for configuration
-class RandomForestConfig(BaseModel):
-    # RF params
-    n_estimators: int = 100
-    max_depth: Union[int, None] = None
-    min_samples_split: int = 2
-    min_samples_leaf: int = 1
-    bootstrap: bool = True
-    oob_score: bool = False
-    n_jobs: int = 10
-    random_state: int = 42
-    # train config
-    feature_name_list: List[str] = ["all", "ccle"]
-
-
-class RandomForestCVConfig(RandomForestConfig):
+class RandomForestCVConfig(BaseModel):
     # only use all features
     feature_name_list: List[str] = ["all"]
     # CV Grid search params
     param_grid: Dict[str, List] = {
-        "n_estimators": [5, 10, 25, 50],
-        "max_depth": [2, 3, 5, 10],
+        "n_estimators": [100],
+        "max_depth": [3],
         "max_features": [
             1.0,
         ],
@@ -43,6 +28,19 @@ class RandomForestCVConfig(RandomForestConfig):
     # CV details
     n_splits: int = 5
     random_state: int = 42
+    n_jobs: int = 15
+    cv_n_jobs: int = 1
+
+
+class WeightedRandomForestCVConfig(RandomForestCVConfig):
+    param_grid: Dict[str, List] = {
+        "n_estimators": [100],
+        "max_depth": [3],
+        "alpha": [0.1, 1, 10],
+        "max_features": [
+            1.0,
+        ],
+    }
 
 
 class XGBoostCVConfig(RandomForestCVConfig):

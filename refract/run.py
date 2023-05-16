@@ -1,10 +1,9 @@
 """Run model training
 """
-import os
 from .datasets import ResponseSet, FeatureSet
 from .trainers import (
-    RFBaseTrainer,
     NestedCVRFTrainer,
+    NestedCVRFTrainerNoRetrain,
     NestedCVXGBoostTrainer,
     NestedCVLGBMTrainer,
 )
@@ -45,17 +44,23 @@ def run(response_path, feature_dir, output_dir, config_path):
             pert_name = run["pert_name"]
             pert_mfc_id = run["pert_mfc_id"]
             dose = run["dose"]
+            if dose != 0.3704:
+                continue
             logger.info(
                 "    Training model for {} {} {}".format(pert_name, dose, pert_mfc_id)
             )
 
-            trainer = NestedCVRFTrainer()
-            trainer.train(
-                response_set=response_set,
-                feature_set=feature_set,
-                config=config,
+            trainer = NestedCVRFTrainer(
+                pert_name=pert_name,
+                pert_mfc_id=pert_mfc_id,
+                dose=dose,
+                feature_name=feature_name,
                 output_dir=output_dir,
+                feature_set=feature_set,
+                response_set=response_set,
+                config=config,
             )
+            trainer.train()
     logger.info("done")
 
 

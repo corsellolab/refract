@@ -1,14 +1,14 @@
 """Run model training
 """
 import os
-from datasets import ResponseSet, FeatureSet
-from trainers import (
+from .datasets import ResponseSet, FeatureSet
+from .trainers import (
     RFBaseTrainer,
     NestedCVRFTrainer,
     NestedCVXGBoostTrainer,
     NestedCVLGBMTrainer,
 )
-from utils import RandomForestCVConfig, XGBoostCVConfig, LGBMCVConfig
+from .utils import RandomForestCVConfig, XGBoostCVConfig, LGBMCVConfig
 import json
 import argparse
 import logging
@@ -34,15 +34,28 @@ def run(response_path, feature_dir, output_dir, config_path):
     else:
         config = RandomForestCVConfig()
 
-    # train model
-    trainer = NestedCVRFTrainer()
-    logger.info("Training model...")
-    trainer.train(
-        response_set=response_set,
-        feature_set=feature_set,
-        config=config,
-        output_dir=output_dir,
-    )
+    # get the unique runs from the response set
+    LFC = response_set.LFC
+    runs = LFC[["pert_name", "dose", "pert_mfc_id"]].drop_duplicates()
+    logger.info("Found {} unique runs".format(len(runs)))
+
+    # train model for each unique run
+    for _, run in runs.iterrows():
+        for feature_name in args.feature_name_list:
+            pert_name = run["pert_name"]
+            pert_mfc_id = run["pert_mfc_id"]
+            dose = run["dose"]
+            logger.info(
+                "    Training model for {} {} {}".format(pert_name, dose, pert_mfc_id)
+            )
+
+            trainer = NestedCVRFTrainer()
+            trainer.train(
+                response_set=response_set,
+                feature_set=feature_set,
+                config=config,
+                output_dir=output_dir,
+            )
     logger.info("done")
 
 
@@ -52,6 +65,7 @@ def parse_args():
     parser.add_argument("--response_path", type=str)
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--config_path", type=str, required=False, default=None)
+    parser.add_argument("--feature_name_list", type=str, nargs="+", default=["all"])
     return parser.parse_args()
 
 

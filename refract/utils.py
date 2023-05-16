@@ -1,7 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Union, Literal, Dict
-import pandas as pd
-import numpy as np
+from typing import List, Union, Dict
 
 
 class AttrDict(dict):

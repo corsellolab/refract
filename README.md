@@ -13,7 +13,7 @@ conda activate corlab
 ## Usage
 Baseline model training: 
 ```
-python refract/run.py \
+python scripts/runCVRFTrain.py \
     --feature_dir <path_to_feature_directory> \
     --response_path <path_to_response_csv> \
     --output_dir <path_to_output_root> \

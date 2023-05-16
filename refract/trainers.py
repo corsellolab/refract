@@ -6,7 +6,7 @@ import numpy as np
 import json
 import pickle
 from typing import List, Dict
-from .utils import RandomForestCVConfig
+from refract.utils import RandomForestCVConfig
 from sklearn.model_selection import KFold
 from sklearn.model_selection import ParameterGrid, GridSearchCV, cross_val_score
 from sklearn.metrics import mean_squared_error, r2_score
@@ -15,7 +15,7 @@ from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 from sklearn.impute import SimpleImputer
 from dataclasses import dataclass, field, asdict
-from .datasets import ResponseSet, FeatureSet
+from refract.datasets import ResponseSet, FeatureSet
 from sklearn.pipeline import Pipeline
 
 logger = logging.getLogger(__name__)

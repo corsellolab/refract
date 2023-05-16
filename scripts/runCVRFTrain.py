@@ -1,14 +1,16 @@
 """Run model training
 """
-from .datasets import ResponseSet, FeatureSet
-from .trainers import (
-    NestedCVRFTrainer,
-    NestedCVRFTrainerNoRetrain,
-    NestedCVXGBoostTrainer,
-    NestedCVLGBMTrainer,
-)
-from .utils import RandomForestCVConfig, XGBoostCVConfig, LGBMCVConfig
+# add parent dir to path
+import sys
+import os
 import json
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from refract.datasets import ResponseSet, FeatureSet
+from refract.trainers import (
+    NestedCVRFTrainer,
+)
+from refract.utils import RandomForestCVConfig
 import argparse
 import logging
 

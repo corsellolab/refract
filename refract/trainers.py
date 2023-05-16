@@ -8,7 +8,7 @@ import pickle
 from typing import List, Dict
 from .utils import RandomForestConfig, RandomForestCVConfig, XGBoostCVConfig
 from sklearn.model_selection import KFold
-from sklearn.model_selection import ParameterGrid
+from sklearn.model_selection import ParameterGrid, GridSearchCV, cross_val_score
 from sklearn.metrics import mean_squared_error, r2_score
 from tqdm import tqdm
 from xgboost import XGBRegressor
@@ -16,6 +16,7 @@ from lightgbm import LGBMRegressor
 from sklearn.impute import SimpleImputer
 from dataclasses import dataclass, field, asdict
 from .datasets import ResponseSet, FeatureSet
+from sklearn.pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -494,7 +495,81 @@ class NestedCVRFTrainerNoRetrain:
         self.trainer_result.model_stats = model_stats
 
 
-class NestedCVXGBoostTrainer(NestedCVRFTrainerNoRetrain):
+class NestedCVRFTrainer(NestedCVRFTrainerNoRetrain):
+    """Perform nested cross validation training for RF model
+    Select best hyperparameters and retrain with all data"""
+
+    def _train_nested_cv(self, X, y):
+        kf_outer = KFold(
+            n_splits=self.config.n_splits,
+            shuffle=True,
+            random_state=self.config.random_state,
+        )
+        kf_inner = KFold(
+            n_splits=self.config.n_splits - 1,
+            shuffle=True,
+            random_state=self.config.random_state,
+        )
+        param_grid = self.config.param_grid
+        # edit params only for the model
+        param_grid = {f"model__{k}": v for k, v in param_grid.items()}
+
+        for train_index, test_index in kf_outer.split(X, y):
+            X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+            y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+
+            # grid search
+            model = self._init_model(self.model_class, self.config)
+            pipe = Pipeline(
+                steps=[
+                    (
+                        "imputer",
+                        SimpleImputer(strategy="median", keep_empty_features=True),
+                    ),
+                    ("model", model),
+                ]
+            )
+            clf = GridSearchCV(pipe, param_grid, cv=kf_inner, scoring="r2", n_jobs=-1)
+            clf.fit(X_train, y_train.values.ravel())
+
+            # get the best model
+            best_params = clf.best_params_
+            best_pipeline = clf.best_estimator_
+            best_model = best_pipeline.named_steps["model"]
+            best_imputer = best_pipeline.named_steps["imputer"]
+
+            # get the train mse
+            train_mse = mean_squared_error(
+                best_pipeline.predict(X_train), y_train.values.ravel()
+            )
+
+            # get the predictions on the test
+            y_pred = best_pipeline.predict(X_test)
+            test_mse = mean_squared_error(y_pred, y_test.values.ravel())
+
+            cv_result = CVResult(
+                train_val_index=train_index,
+                test_index=test_index,
+                ccle_names=y_test.index.tolist(),
+                y_true=y_test.values.ravel(),
+                y_pred=y_pred,
+                models=[
+                    best_model,
+                ],
+                imputers=[
+                    best_imputer,
+                ],
+                best_params=[
+                    best_params,
+                ],
+                train_mse=train_mse,
+                val_mse=train_mse,
+                test_mse=test_mse,
+            )
+            self.trainer_result.cv_results.append(cv_result)
+
+
+class NestedCVXGBoostTrainer(NestedCVRFTrainer):
     def train(self, *args, **kwargs):
         kwargs["model"] = XGBRegressor
         super().train(*args, **kwargs)
@@ -509,7 +584,7 @@ class NestedCVXGBoostTrainer(NestedCVRFTrainerNoRetrain):
         )
 
 
-class NestedCVLGBMTrainer(NestedCVRFTrainerNoRetrain):
+class NestedCVLGBMTrainer(NestedCVRFTrainer):
     def train(self, *args, **kwargs):
         kwargs["model"] = LGBMRegressor
         super().train(*args, **kwargs)

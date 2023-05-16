@@ -1,9 +1,11 @@
-import pandas as pd
-import re
 import logging
+import re
+from typing import List, Tuple
+
+import pandas as pd
 from sklearn.decomposition import PCA
+
 from refract.utils import AttrDict
-from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Run nested CV RF model training
+"""Run nested CV Weighted RF model training
 """
 # add parent dir to path
 import json
@@ -10,8 +10,8 @@ import argparse
 import logging
 
 from refract.datasets import FeatureSet, ResponseSet
-from refract.trainers import CVRFTrainer
-from refract.utils import RandomForestCVConfig
+from refract.trainers import WeightedCVRFTrainer
+from refract.utils import WeightedRandomForestCVConfig
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
@@ -27,12 +27,7 @@ def run(response_path, feature_dir, output_dir, config_path):
     feature_set.load_concatenated_feature_tables()
 
     # if config, load config
-    if config_path:
-        with open(config_path, "r") as f:
-            config = json.load(f)
-        config = RandomForestCVConfig(**config)
-    else:
-        config = RandomForestCVConfig()
+    config = WeightedRandomForestCVConfig()
 
     # get the unique runs from the response set
     LFC = response_set.LFC
@@ -51,7 +46,7 @@ def run(response_path, feature_dir, output_dir, config_path):
                 "    Training model for {} {} {}".format(pert_name, dose, pert_mfc_id)
             )
 
-            trainer = CVRFTrainer(
+            trainer = WeightedCVRFTrainer(
                 pert_name=pert_name,
                 pert_mfc_id=pert_mfc_id,
                 dose=dose,

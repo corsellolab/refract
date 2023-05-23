@@ -386,7 +386,6 @@ class CVRFTrainer(NestedCVRFTrainer):
             X_train, X_test = X.iloc[train_index], X.iloc[test_index]
             y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-            # grid search
             model = self._init_model(self.model_class, self.config)
             pipe = Pipeline(
                 steps=[

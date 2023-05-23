@@ -19,7 +19,7 @@ class FeatureSet:
         self.continuous_feature_tables = AttrDict()
         self.discrete_feature_tables = AttrDict()
 
-    def load_feature_tables(self):
+    def load_individual_feature_tables(self):
         """Load feature tables from a directory"""
         self.feature_tables["GE"] = pd.read_csv(
             f"{self.feature_dir}/ge.csv", index_col=0
@@ -48,23 +48,24 @@ class FeatureSet:
         self.feature_tables["shRNA"] = pd.read_csv(
             f"{self.feature_dir}/shrna.csv", index_col=0
         )
-        self.feature_tables["repurposing"] = pd.read_csv(
+        self.feature_tables["REP"] = pd.read_csv(
             f"{self.feature_dir}/rep.csv", index_col=0
         )
+
         # repurposing meta table requires some formatting
-        repurposing_meta = pd.read_csv(f"{self.feature_dir}/rep_info.csv")
+        # repurposing_meta = pd.read_csv(f"{self.feature_dir}/rep_info.csv")
         # format the repurposing_meta table
-        repurposing_meta["column_name"] = "REP_" + repurposing_meta[
-            "column_name"
-        ].astype(str)
-        repurposing_meta["name"] = (
-            repurposing_meta["name"]
-            .astype(str)
-            .apply(lambda x: re.sub(r"[^\w\s]", "-", x))
-        )
+        # repurposing_meta["column_name"] = "REP_" + repurposing_meta[
+        #    "column_name"
+        # ].astype(str)
+        # repurposing_meta["name"] = (
+        #    repurposing_meta["name"]
+        #    .astype(str)
+        #    .apply(lambda x: re.sub(r"[^\w\s]", "-", x))
+        # )
         # remove columns
-        repurposing_meta = repurposing_meta.drop(columns=["dose", "screen_id"])
-        self.feature_tables["repurposing_meta"] = repurposing_meta
+        # repurposing_meta = repurposing_meta.drop(columns=["dose", "screen_id"])
+        # self.feature_tables["repurposing_meta"] = repurposing_meta
 
         self.continuous_features = {
             "GE": self.feature_tables.GE,
@@ -74,7 +75,7 @@ class FeatureSet:
             "PROT": self.feature_tables.PROT,
             "XPR": self.feature_tables.XPR,
             "shRNA": self.feature_tables.shRNA,
-            "REP": self.feature_tables.repurposing,
+            "REP": self.feature_tables.REP,
         }
         self.discrete_features = {
             "MUT": self.feature_tables.MUT,

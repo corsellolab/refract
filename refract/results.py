@@ -96,7 +96,7 @@ class TrainerResult:
             self.output_dir,
             f"{self.pert_name}_{self.pert_mfc_id}_{self.dose}_{self.feature_name}_feature_importances.csv",
         )
-        self.feature_importances.to_csv(output_path, index=False)
+        self.feature_importances.to_csv(output_path, index=True)
 
     def save_trainer_result(self):
         """Save trainer result to a file as pkl"""

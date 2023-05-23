@@ -47,18 +47,16 @@ def run(response_path, feature_dir, output_dir, config_path):
         pert_name = run["pert_name"]
         pert_mfc_id = run["pert_mfc_id"]
         dose = run["dose"]
-        if dose != 0.3704:
-            continue
         logger.info(
             "    Training model for {} {} {}".format(pert_name, dose, pert_mfc_id)
         )
-
+        all_output_dir = os.path.join(output_dir, "all")
         trainer = CVRFTrainer(
             pert_name=pert_name,
             pert_mfc_id=pert_mfc_id,
             dose=dose,
             feature_name="all",
-            output_dir=output_dir,
+            output_dir=all_output_dir,
             feature_set=feature_set,
             response_set=response_set,
             config=config,
@@ -80,9 +78,7 @@ def run(response_path, feature_dir, output_dir, config_path):
     ]
     for feature_set_name in feature_sets:
         # create output dir
-        feature_set_output_dir = os.path.join(
-            output_dir, "subset_models", feature_set_name
-        )
+        feature_set_output_dir = os.path.join(output_dir, feature_set_name)
         if not os.path.exists(feature_set_output_dir):
             os.makedirs(feature_set_output_dir)
         logger.info("Using feature set {}".format(feature_set_name))
@@ -91,8 +87,6 @@ def run(response_path, feature_dir, output_dir, config_path):
             pert_name = run["pert_name"]
             pert_mfc_id = run["pert_mfc_id"]
             dose = run["dose"]
-            if dose != 0.3704:
-                continue
             logger.info(
                 "    Training model for {} {} {}".format(pert_name, dose, pert_mfc_id)
             )

@@ -45,8 +45,6 @@ def run(response_path, feature_dir, output_dir, config_path):
             pert_name = run["pert_name"]
             pert_mfc_id = run["pert_mfc_id"]
             dose = run["dose"]
-            if dose != 0.3704:
-                continue
             logger.info(
                 "    Training model for {} {} {}".format(pert_name, dose, pert_mfc_id)
             )

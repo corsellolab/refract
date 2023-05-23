@@ -374,7 +374,37 @@ class NestedCVRFTrainer(NestedCVRFTrainerNoRetrain):
 
 
 class CVRFTrainer(NestedCVRFTrainer):
-    def _train_nested_cv(self, X, y):
+    def train(self):
+        # get features and response
+        X, y = self.response_set.get_joined_features(
+            pert_name=self.pert_name,
+            pert_mfc_id=self.pert_mfc_id,
+            dose=self.dose,
+            feature_set=self.feature_set,
+            feature_name=self.feature_name,
+        )
+
+        # perform nested cross validation
+        logger.info("Training using cross validation...")
+        self._train_cv(X, y)
+
+        # get feature importances
+        logger.info("Computing feature importances...")
+        self._compute_cv_feature_importances(X)
+
+        # get model stats
+        logger.info("Computing model stats...")
+        self._compute_model_stats(X, y)
+
+        # save output
+        logger.info("Saving output...")
+        self._save_output()
+
+        # save config
+        with open(f"{self.trainer_result.output_dir}/config.json", "w") as f:
+            json.dump(self.config.__dict__, f)
+
+    def _train_cv(self, X, y):
         kf_outer = KFold(
             n_splits=self.config.n_splits,
             shuffle=True,
@@ -494,9 +524,9 @@ class CVXGBoostTrainer(CVRFTrainer):
             objective=config.objective,
         )
 
-    def _train_nested_cv(self, X, y):
+    def _train_cv(self, X, y):
         y = ((y - y.max()) * -1 + 1) ** 2
-        super()._train_nested_cv(X, y)
+        super()._train_cv(X, y)
 
 
 class NestedCVLGBMTrainer(NestedCVRFTrainer):
@@ -508,9 +538,9 @@ class NestedCVLGBMTrainer(NestedCVRFTrainer):
         """Initialize the RF model"""
         return model(n_jobs=config.n_jobs, random_state=config.random_state)
 
-    def _train_nested_cv(self, X, y, model, config):
+    def _train_cv(self, X, y, model, config):
         # replace JSON special characters in the feature names
         # see: https://github.com/autogluon/autogluon/issues/399
         for char in ["'", '"', ":", ",", "{", "}", "[", "]"]:
             X.columns = X.columns.str.replace(char, "_")
-        return super()._train_nested_cv(X, y, model, config)
+        return super()._train_cv(X, y, model, config)

@@ -20,7 +20,7 @@ jobs:
         echo $CONDA/bin >> $GITHUB_PATH
     - name: Install dependencies
       run: |
-        conda env create --file environment.yml
+        conda env create --file environment.yml --name base
         conda activate corlab
     - name: Test with pytest
       run: |

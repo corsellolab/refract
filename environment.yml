@@ -12,9 +12,16 @@ dependencies:
       - lightgbm
       - pre-commit
       - pydantic
+      - pyqt5-sip
+      - pytest
       - pyyaml
       - scikit-learn
+      - shap
+      - stringdb
+      - tensorboard
+      - torch
+      - torch-tb-profiler
+      - torchaudio
+      - torchvision
       - tqdm
       - xgboost
-      - pytest
-prefix: /home/nphillips/miniconda3/envs/corlab

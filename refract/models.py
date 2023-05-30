@@ -12,5 +12,5 @@ class FeedForwardNet(nn.Module):
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
-        x = self.fc3(x).squeeze(-1)
+        x = self.fc3(x)
         return x

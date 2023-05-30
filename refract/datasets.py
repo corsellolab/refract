@@ -188,7 +188,8 @@ class PrismDataset(Dataset):
         feature_importance_df,
         top_k_features,
         slate_length,
-        quantile_transfomer=None,
+        feature_transformer=None,
+        label_transformer=None,
         prioritize_sensitive=True,
     ):
         self.response_df = response_df
@@ -207,21 +208,24 @@ class PrismDataset(Dataset):
         self.feature_df = self.feature_df.loc[:, self.top_features]
 
         # quantile transform all features
-        if not quantile_transfomer:
-            self.quantile_transfomer = PowerTransformer()
-            self.quantile_transfomer.fit(self.feature_df)
+        if not feature_transformer:
+            self.feature_transformer = PowerTransformer()
+            self.feature_transformer.fit(self.feature_df)
         else:
-            self.quantile_transfomer = quantile_transfomer
+            self.feature_transformer = feature_transformer
 
         # quantile transform feature_df
         self.feature_df = pd.DataFrame(
-            self.quantile_transfomer.transform(self.feature_df),
+            self.feature_transformer.transform(self.feature_df),
             columns=self.feature_df.columns,
             index=self.feature_df.index,
         )
 
         # quantile transform labels
-        self.label_transformer = MinMaxScaler()
+        if not label_transformer:
+            self.label_transformer = MinMaxScaler()
+        else:
+            self.label_transformer = label_transformer
         self.response_df["LFC.cb"] = self.label_transformer.fit_transform(
             self.response_df[["LFC.cb"]]
         )
@@ -262,7 +266,8 @@ class PrismDataset(Dataset):
         samples = self.joined_df.loc[[index_name] + ccle_names, :]
 
         # Extract features and labels from the samples
+        ccle_name = self.ccle_names[idx]
         features = torch.tensor(samples.iloc[:, :-1].values, dtype=torch.float32)
         labels = torch.tensor(samples.iloc[:, -1].values.squeeze(), dtype=torch.float32)
 
-        return features, labels
+        return ccle_name, features, labels

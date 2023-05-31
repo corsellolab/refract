@@ -1,0 +1,39 @@
+#!/usr/bin/env nextflow
+
+nextflow.enable.dsl=2
+
+params.run_manifest = "$baseDir/run_manifest.csv"
+params.output_dir = '/'
+
+process train_nn_ranking {
+    errorStrategy { task.attempt <= maxRetries ? 'retry' : 'ignore' }
+    cpus { 4 * task.attempt }
+    memory { 16.GB * task.attempt }
+    time { 1.hour * task.attempt }
+    maxRetries 3
+    executor 'slurm'
+    conda '/home/groups/dkurtz/tools/conda/miniconda3/envs/corlab'
+    publishDir params.output_dir, mode: 'copy'
+
+    input:
+        tuple val(drug_name), file(response_file), file(feature_path), file(feature_importance_path) from response_files
+
+    output:
+        path("${drug_name}")
+
+    script:
+    """
+    mkdir -p ${params.output_dir}/${drug_name}
+    python runNNRankingTrain.py --response_path ${response_path} --feature_path ${feature_path} --feature_importance_path ${feature_importance_path} --output_dir ${params.output_dir}/${drug_name}
+    """
+}
+
+workflow {
+    Channel
+        .fromPath( params.run_manifest )
+        .splitCsv(header: true, sep:',')
+        .map { row -> tuple(row.drug_name, file(row.response_path), file(row.feature_path), file(row.feature_importance_path)) }
+        .set { run_manifest_ch }
+
+    train_nn_ranking(run_manifest_ch)
+}

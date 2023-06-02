@@ -28,7 +28,7 @@ logging.basicConfig(level="INFO")
 
 NUM_FEATURES = 100
 SLATE_LENGTH = 10
-NUM_EPOCHS = 200
+NUM_EPOCHS = 50
 BATCH_SIZE = 512
 
 
@@ -72,7 +72,7 @@ def run(response_path, feature_path, feature_importance_path, output_dir):
         )
         model = FeedForwardNet(NUM_FEATURES)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-        trainer = NNRankerTrainer(model, optimizer, num_workers=8)
+        trainer = NNRankerTrainer(model, optimizer, num_workers=3)
         trainer.train(ds_train, BATCH_SIZE, NUM_EPOCHS)
 
         # Eval model
@@ -82,8 +82,7 @@ def run(response_path, feature_path, feature_importance_path, output_dir):
             feature_importance_df,
             top_k_features=100,
             slate_length=10,
-            feature_transformer=ds_train.feature_transformer,
-            label_transformer=ds_train.label_transformer,
+            feature_transformer=ds_train.feature_transformer
         )
         train_ccle_names, train_preds, train_trues, train_corr = trainer.eval(ds_train)
         test_ccle_names, test_preds, test_trues, test_corr = trainer.eval(ds_test)

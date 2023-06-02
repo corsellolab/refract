@@ -2,8 +2,9 @@
 
 nextflow.enable.dsl=2
 
-params.run_manifest = "$baseDir/run_manifest.csv"
-params.output_dir = '/'
+params.run_manifest = "/scratch/users/nphill22/projects/corsello_lab/configure_ranking_NN_runs/paths_for_ranking_model.csv"
+params.output_dir = "output"
+params.dev = false
 
 process train_nn_ranking {
     errorStrategy { task.attempt <= maxRetries ? 'retry' : 'ignore' }
@@ -16,15 +17,15 @@ process train_nn_ranking {
     publishDir params.output_dir, mode: 'copy'
 
     input:
-        tuple val(drug_name), file(response_file), file(feature_path), file(feature_importance_path) from response_files
+        tuple val(drug_name), file(response_path), file(feature_path), file(feature_importance_path)
 
     output:
         path("${drug_name}")
 
     script:
     """
-    mkdir -p ${params.output_dir}/${drug_name}
-    python runNNRankingTrain.py --response_path ${response_path} --feature_path ${feature_path} --feature_importance_path ${feature_importance_path} --output_dir ${params.output_dir}/${drug_name}
+    mkdir -p ${drug_name}
+    python /scratch/users/nphill22/projects/corsello_lab/configure_ranking_NN_runs/refract/scripts/runNNRankingTrain.py --response_path ${response_path} --feature_path ${feature_path} --feature_importance_path ${feature_importance_path} --output_dir ${drug_name}
     """
 }
 
@@ -33,6 +34,7 @@ workflow {
         .fromPath( params.run_manifest )
         .splitCsv(header: true, sep:',')
         .map { row -> tuple(row.drug_name, file(row.response_path), file(row.feature_path), file(row.feature_importance_path)) }
+        .take(params.dev ? 2 : -1)
         .set { run_manifest_ch }
 
     train_nn_ranking(run_manifest_ch)

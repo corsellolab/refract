@@ -200,13 +200,18 @@ class PrismDataset(Dataset):
         self.prioritize_sensitive = prioritize_sensitive
 
         # Get the top k features based on importance
-        self.top_features = self.feature_importance_df.nlargest(
-            top_k_features, "importance"
+        self.top_features = self.feature_importance_df.nsmallest(
+            top_k_features*2, "rank"
         )["feature"].tolist()
 
+        # hack: 
+        #self.top_features = [i.replace(".", "-") for i in self.top_features]
+        self.top_features = [i for i in self.top_features if i in self.feature_df.columns]
+        self.top_features = list(set(self.top_features))
+        self.top_features = self.top_features[:top_k_features]
         # filter self.feature_df to include only the top features
         self.feature_df = self.feature_df.loc[:, self.top_features]
-
+      
         # quantile transform all features
         if not feature_transformer:
             self.feature_transformer = PowerTransformer()

@@ -82,7 +82,7 @@ def run(response_path, feature_path, feature_importance_path, output_dir):
             feature_importance_df,
             top_k_features=100,
             slate_length=10,
-            feature_transformer=ds_train.feature_transformer
+            feature_transformer=ds_train.feature_transformer,
         )
         train_ccle_names, train_preds, train_trues, train_corr = trainer.eval(ds_train)
         test_ccle_names, test_preds, test_trues, test_corr = trainer.eval(ds_test)

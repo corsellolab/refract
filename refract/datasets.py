@@ -201,17 +201,23 @@ class PrismDataset(Dataset):
 
         # Get the top k features based on importance
         self.top_features = self.feature_importance_df.nsmallest(
-            top_k_features*2, "rank"
+            top_k_features * 2, "rank"
         )["feature"].tolist()
 
-        # hack: 
-        #self.top_features = [i.replace(".", "-") for i in self.top_features]
-        self.top_features = [i for i in self.top_features if i in self.feature_df.columns]
+        # HACK: due to mismatches in the feature names between the feature importance
+        # cannot guarantee that all top features are in the feature_df
+        # get approximately the top_k_features, but not more
+        self.top_features = [
+            i for i in self.top_features if i in self.feature_df.columns
+        ]
         self.top_features = list(set(self.top_features))
+        # for reproducibility, sort the features
+        self.top_features.sort()
         self.top_features = self.top_features[:top_k_features]
+
         # filter self.feature_df to include only the top features
         self.feature_df = self.feature_df.loc[:, self.top_features]
-      
+
         # quantile transform all features
         if not feature_transformer:
             self.feature_transformer = PowerTransformer()
@@ -219,7 +225,7 @@ class PrismDataset(Dataset):
         else:
             self.feature_transformer = feature_transformer
 
-        # quantile transform feature_df
+        # transform the feature_df
         self.feature_df = pd.DataFrame(
             self.feature_transformer.transform(self.feature_df),
             columns=self.feature_df.columns,
@@ -254,6 +260,7 @@ class PrismDataset(Dataset):
         # get ccle_names
         self.ccle_names = self.joined_df.index.tolist()
 
+        # threshold slate_length, edge case
         if len(self.ccle_names) < self.slate_length:
             self.slate_length = len(self.ccle_names)
 

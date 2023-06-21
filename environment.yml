@@ -3,12 +3,12 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - matplotlib
-  - pandas
-  - scipy
-  - seaborn
   - pip
   - pip:
+      - matplotlib
+      - pandas
+      - scipy
+      - seaborn
       - lightgbm
       - pre-commit
       - pydantic

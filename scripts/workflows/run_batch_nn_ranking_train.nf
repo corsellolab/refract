@@ -3,7 +3,7 @@
 nextflow.enable.dsl=2
 
 params.run_manifest = "/scratch/users/nphill22/projects/corsello_lab/configure_ranking_NN_runs/paths_for_ranking_model.csv"
-params.output_dir = "output"
+params.output_dir = "xgboost_output"
 params.dev = false
 
 process train_nn_ranking {
@@ -25,7 +25,7 @@ process train_nn_ranking {
     script:
     """
     mkdir -p ${drug_name}
-    python /scratch/users/nphill22/projects/corsello_lab/configure_ranking_NN_runs/refract/scripts/runNNRankingTrain.py --response_path ${response_path} --feature_path ${feature_path} --feature_importance_path ${feature_importance_path} --output_dir ${drug_name}
+    python /scratch/users/nphill22/projects/corsello_lab/configure_ranking_NN_runs/refract/scripts/runXGBoostRankingTrain.py --response_path ${response_path} --feature_path ${feature_path} --feature_importance_path ${feature_importance_path} --output_dir ${drug_name}
     """
 }
 

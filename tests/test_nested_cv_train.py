@@ -3,7 +3,7 @@ import os
 import unittest
 
 from refract.datasets import FeatureSet, ResponseSet
-from refract.trainers import (
+from refract.rf_trainers import (
     CVRFTrainer,
     CVXGBoostTrainer,
     NestedCVRFTrainer,

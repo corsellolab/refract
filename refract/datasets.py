@@ -2,8 +2,12 @@ import logging
 import re
 from typing import List, Tuple
 
+import numpy as np
 import pandas as pd
+import torch
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import MinMaxScaler, PowerTransformer
+from torch.utils.data import Dataset
 
 from refract.utils import AttrDict
 
@@ -174,3 +178,108 @@ class ResponseSet:
         y = joined.loc[:, ["response"]]
         X = joined.drop(columns=["response"])
         return X, y
+
+
+class PrismDataset(Dataset):
+    def __init__(
+        self,
+        response_df,
+        feature_df,
+        feature_importance_df,
+        top_k_features,
+        slate_length,
+        feature_transformer=None,
+        label_transformer=None,
+        prioritize_sensitive=True,
+    ):
+        self.response_df = response_df
+        self.feature_df = feature_df
+        self.feature_importance_df = feature_importance_df
+        self.top_k_features = top_k_features
+        self.slate_length = slate_length
+        self.prioritize_sensitive = prioritize_sensitive
+
+        # Get the top k features based on importance
+        self.top_features = self.feature_importance_df.nsmallest(
+            top_k_features * 2, "rank"
+        )["feature"].tolist()
+
+        # HACK: due to mismatches in the feature names between the feature importance
+        # cannot guarantee that all top features are in the feature_df
+        # get approximately the top_k_features, but not more
+        self.top_features = [
+            i for i in self.top_features if i in self.feature_df.columns
+        ]
+        self.top_features = list(set(self.top_features))
+        # for reproducibility, sort the features
+        self.top_features.sort()
+        self.top_features = self.top_features[:top_k_features]
+
+        # filter self.feature_df to include only the top features
+        self.feature_df = self.feature_df.loc[:, self.top_features]
+
+        # quantile transform all features
+        if not feature_transformer:
+            self.feature_transformer = PowerTransformer()
+            self.feature_transformer.fit(self.feature_df)
+        else:
+            self.feature_transformer = feature_transformer
+
+        # transform the feature_df
+        self.feature_df = pd.DataFrame(
+            self.feature_transformer.transform(self.feature_df),
+            columns=self.feature_df.columns,
+            index=self.feature_df.index,
+        )
+
+        # quantile transform labels
+        if not label_transformer:
+            self.label_transformer = MinMaxScaler()
+        else:
+            self.label_transformer = label_transformer
+        self.response_df["LFC.cb"] = self.label_transformer.fit_transform(
+            self.response_df[["LFC.cb"]]
+        )
+        if self.prioritize_sensitive:
+            self.response_df.loc[:, "LFC.cb"] = 1 - self.response_df.loc[:, "LFC.cb"]
+        # scale from 0 to 5
+        self.response_df.loc[:, "LFC.cb"] = self.response_df.loc[:, "LFC.cb"] * 5
+
+        # Join response_df and feature_df on "ccle_name"
+        self.joined_df = pd.merge(self.response_df, self.feature_df, on="ccle_name")
+        # set index to "ccle_name"
+        self.joined_df = self.joined_df.set_index("ccle_name")
+
+        # Order the columns
+        self.cols = self.top_features + ["LFC.cb"]
+        self.joined_df = self.joined_df.loc[:, self.cols]
+
+        # impute missing values
+        self.joined_df = self.joined_df.fillna(-1)
+
+        # get ccle_names
+        self.ccle_names = self.joined_df.index.tolist()
+
+        # threshold slate_length, edge case
+        if len(self.ccle_names) < self.slate_length:
+            self.slate_length = len(self.ccle_names)
+
+    def __len__(self):
+        return len(self.ccle_names)
+
+    def __getitem__(self, idx):
+        # get slate_length - 1 samples from ccle_names
+        index_name = self.ccle_names[idx]
+        ccle_names = np.random.choice(
+            self.ccle_names, self.slate_length - 1, replace=False
+        ).tolist()
+
+        # get [index_name, *ccle_names] from joined_df
+        samples = self.joined_df.loc[[index_name] + ccle_names, :]
+
+        # Extract features and labels from the samples
+        ccle_name = self.ccle_names[idx]
+        features = torch.tensor(samples.iloc[:, :-1].values, dtype=torch.float32)
+        labels = torch.tensor(samples.iloc[:, -1].values.squeeze(), dtype=torch.float32)
+
+        return ccle_name, features, labels

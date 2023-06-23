@@ -3,7 +3,7 @@ import os
 import unittest
 
 from refract.datasets import FeatureSet, ResponseSet
-from refract.trainers import CVRFTrainer
+from refract.refract.rf_trainers import CVRFTrainer
 from refract.utils import RandomForestCVConfig
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))

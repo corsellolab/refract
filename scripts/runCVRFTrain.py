@@ -10,7 +10,7 @@ import argparse
 import logging
 
 from refract.datasets import FeatureSet, ResponseSet
-from refract.trainers import CVRFTrainer
+from refract.rf_trainers import CVRFTrainer
 from refract.utils import RandomForestCVConfig
 
 logger = logging.getLogger(__name__)

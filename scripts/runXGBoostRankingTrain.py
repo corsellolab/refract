@@ -87,6 +87,8 @@ def run(response_path, feature_path, feature_importance_path, output_dir):
     logger.info("Loading response data...")
     response_df = pd.read_csv(response_path)
     feature_importance_df = pd.read_csv(feature_importance_path)
+    # filter response data to only include single dose
+    response_df = response_df[response_df["pert_idose"] == 2.5]
 
     # START CV LOOP
     splitter = KFold(n_splits=10, shuffle=True, random_state=42)

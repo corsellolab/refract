@@ -8,8 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import shap
-import torch
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import KFold
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import argparse
@@ -18,10 +17,7 @@ import logging
 import xgboost as xgb
 
 from refract.datasets import FeatureSet, PrismDataset, ResponseSet
-from refract.losses import lambdaLoss
 from refract.metrics import get_stringdb_network_interactions
-from refract.models import FeedForwardNet
-from refract.ranking_trainers import NNRankerTrainer
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")

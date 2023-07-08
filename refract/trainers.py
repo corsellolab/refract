@@ -1,18 +1,17 @@
 # Trainer for the XGboost ranking model
+import argparse
 import json
+import logging
 import os
-import pickle 
+import pickle
 import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import shap
-from sklearn.model_selection import KFold
-
-import argparse
-import logging
 import xgboost as xgb
+from sklearn.model_selection import KFold
 
 from refract.datasets import FeatureSet, PrismDataset, ResponseSet
 from refract.metrics import get_stringdb_network_interactions
@@ -25,8 +24,10 @@ SLATE_LENGTH = 10
 NUM_EPOCHS = 1
 NUM_TREES = 100
 
+
 class XGBoostRankingTrainer:
     """Trains a XGBoost ranking model."""
+
     def __init__(self, train_ds, val_ds, test_ds, num_epochs=1, model_config={}):
         self.train_ds = train_ds
         self.val_ds = val_ds
@@ -60,7 +61,7 @@ class XGBoostRankingTrainer:
             "colsample_bytree": 0.5,
             "colsample_bylevel": 0.5,
             "colsample_bynode": 0.5,
-            "seed": 42
+            "seed": 42,
         }
         params.update(config)
         return params
@@ -68,8 +69,18 @@ class XGBoostRankingTrainer:
     def train(self):
         logger.info("Training XGBoost ranking model...")
         # get training datasets
-        group_train_features, group_train_labels, train_groups, _ = torch_dataset_to_numpy_array(self.train_ds)
-        group_val_features, group_val_labels, val_groups, _ = torch_dataset_to_numpy_array(self.val_ds)
+        (
+            group_train_features,
+            group_train_labels,
+            train_groups,
+            _,
+        ) = torch_dataset_to_numpy_array(self.train_ds)
+        (
+            group_val_features,
+            group_val_labels,
+            val_groups,
+            _,
+        ) = torch_dataset_to_numpy_array(self.val_ds)
 
         # get dmatrix objects
         group_train_dmatrix = xgb.DMatrix(
@@ -83,7 +94,9 @@ class XGBoostRankingTrainer:
 
         # initial training
         logger.info("    Initial training...")
-        xgb_model = xgb.train(params, group_train_dmatrix, num_boost_round=self.num_trees)
+        xgb_model = xgb.train(
+            params, group_train_dmatrix, num_boost_round=self.num_trees
+        )
         # continue training until validation score doesnt improve for 10 rounds
         logger.info("    Continuing training...")
         xgb_model = xgb.train(
@@ -93,7 +106,7 @@ class XGBoostRankingTrainer:
             evals=[(group_val_dmatrix, "validation")],
             early_stopping_rounds=10,
             verbose_eval=10,
-            xgb_model=xgb_model
+            xgb_model=xgb_model,
         )
 
         self.model = xgb_model
@@ -102,12 +115,18 @@ class XGBoostRankingTrainer:
         feature_dmatrix = xgb.DMatrix(features_array)
         preds = self.model.predict(feature_dmatrix)
         return preds
-    
+
     def compute_stats(self):
         # get feature numpy arrays
-        train_features, _, _, train_ccle_names = torch_dataset_to_numpy_array(self.train_ds, index_only=True)
-        val_features, _, _, val_ccle_names = torch_dataset_to_numpy_array(self.val_ds, index_only=True)
-        test_features, _, _, test_ccle_names = torch_dataset_to_numpy_array(self.test_ds, index_only=True)
+        train_features, _, _, train_ccle_names = torch_dataset_to_numpy_array(
+            self.train_ds, index_only=True
+        )
+        val_features, _, _, val_ccle_names = torch_dataset_to_numpy_array(
+            self.val_ds, index_only=True
+        )
+        test_features, _, _, test_ccle_names = torch_dataset_to_numpy_array(
+            self.test_ds, index_only=True
+        )
 
         # get unscaled labels
         train_labels = self.train_ds.unscaled_labels

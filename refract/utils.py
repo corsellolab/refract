@@ -1,7 +1,7 @@
 from typing import Dict, List
 
-from pydantic import BaseModel
 import numpy as np
+from pydantic import BaseModel
 
 
 class AttrDict(dict):
@@ -80,13 +80,14 @@ class LGBMCVConfig(RandomForestNestedCVConfig):
     }
     n_jobs: int = 10
 
+
 ### Functions for creating matrices from Datasets
 def torch_dataset_to_numpy_array(ds, index_only=False, num_epochs=1):
     """Load from a Dataset into a numpy array.
 
     Args:
-        ds (torch.Dataset): 
-        index_only (bool, optional): Only include index variant. 
+        ds (torch.Dataset):
+        index_only (bool, optional): Only include index variant.
             Defaults to False.
         num_epochs (int, optional): Number of epochs to run.
     """

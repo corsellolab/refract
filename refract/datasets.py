@@ -96,7 +96,9 @@ class PrismDataset(Dataset):
             self.response_df[["response"]]
         )
         if self.prioritize_sensitive:
-            self.response_df.loc[:, "response"] = 1 - self.response_df.loc[:, "response"]
+            self.response_df.loc[:, "response"] = (
+                1 - self.response_df.loc[:, "response"]
+            )
         # scale from 0 to 5
         self.response_df.loc[:, "response"] = self.response_df.loc[:, "response"] * 5
 

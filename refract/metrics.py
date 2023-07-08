@@ -1,8 +1,8 @@
 """Metrics for evaluating recommender systems."""
 from typing import List
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import stringdb
 
 
@@ -36,6 +36,7 @@ def get_stringdb_network_interactions(gene_list):
     edges = list(set(edges))
     return network_interactions, edges
 
+
 def get_merged_shap_values_and_features(trainer_list):
     """Aggregate SHAP values and features from multiple trainers."""
     all_shap_values = []
@@ -51,11 +52,13 @@ def get_merged_shap_values_and_features(trainer_list):
     assert all([x == feature_names[0] for x in feature_names])
     return all_shap_values, all_features, feature_names[0]
 
+
 def get_top_k_features(merged_shap_values, feature_names, k=20):
     """Get the top k features from the SHAP values."""
     top_features = np.argsort(np.abs(merged_shap_values).mean(0))[-k:][::-1]
     top_feature_names = [feature_names[i] for i in top_features]
     return top_feature_names
+
 
 def get_test_predictions(trainer_list):
     """Return test_df from multiple trainers.

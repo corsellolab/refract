@@ -87,25 +87,27 @@ class PrismDataset(Dataset):
         self.prioritize_sensitive = prioritize_sensitive
 
         # quantile transform labels
+        self.response_df["unscaled_response"] = self.response_df["response"].values
         if not label_transformer:
             self.label_transformer = MinMaxScaler()
         else:
             self.label_transformer = label_transformer
-        self.response_df["LFC.cb"] = self.label_transformer.fit_transform(
-            self.response_df[["LFC.cb"]]
+        self.response_df["response"] = self.label_transformer.fit_transform(
+            self.response_df[["response"]]
         )
         if self.prioritize_sensitive:
-            self.response_df.loc[:, "LFC.cb"] = 1 - self.response_df.loc[:, "LFC.cb"]
+            self.response_df.loc[:, "response"] = 1 - self.response_df.loc[:, "response"]
         # scale from 0 to 5
-        self.response_df.loc[:, "LFC.cb"] = self.response_df.loc[:, "LFC.cb"] * 5
+        self.response_df.loc[:, "response"] = self.response_df.loc[:, "response"] * 5
 
         # Join response_df and feature_df on "ccle_name"
         self.joined_df = pd.merge(self.response_df, self.feature_df, on="ccle_name")
         # set index to "ccle_name"
         self.joined_df = self.joined_df.set_index("ccle_name")
+        self.unscaled_labels = self.joined_df["unscaled_response"].values
 
-        # Order the columns
-        self.cols = list(self.feature_df.columns) + ["LFC.cb"]
+        # Filter and order the columns
+        self.cols = list(self.feature_df.columns) + ["response"]
         self.joined_df = self.joined_df.loc[:, self.cols]
 
         # impute missing values

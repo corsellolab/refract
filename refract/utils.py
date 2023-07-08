@@ -1,6 +1,7 @@
 from typing import Dict, List
 
 from pydantic import BaseModel
+import numpy as np
 
 
 class AttrDict(dict):
@@ -78,3 +79,37 @@ class LGBMCVConfig(RandomForestNestedCVConfig):
         "max_depth": [2, 4, 8],
     }
     n_jobs: int = 10
+
+### Functions for creating matrices from Datasets
+def torch_dataset_to_numpy_array(ds, index_only=False, num_epochs=1):
+    """Load from a Dataset into a numpy array.
+
+    Args:
+        ds (torch.Dataset): 
+        index_only (bool, optional): Only include index variant. 
+            Defaults to False.
+        num_epochs (int, optional): Number of epochs to run.
+    """
+    features = []
+    labels = []
+    ccle_names = []
+    groups = []
+    for _ in range(num_epochs):
+        for ex in ds:
+            ccle_name, feat, label = ex
+            feat = feat.numpy()
+            label = label.numpy()
+
+            if index_only:
+                feat = feat[0, :].reshape(1, -1)
+                label = label[0].reshape(1, -1)
+
+            features.append(feat)
+            labels.append(label)
+            groups.append(label.shape)
+            ccle_names.append(ccle_name)
+    features_array = np.concatenate(features, axis=0)
+    labels_array = np.concatenate(labels, axis=0)
+    group_array = np.array(groups)
+
+    return features_array, labels_array, group_array, ccle_names

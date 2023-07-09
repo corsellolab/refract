@@ -5,15 +5,12 @@ import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import shap
 from sklearn.model_selection import KFold
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import argparse
 import logging
-
-import xgboost as xgb
 
 from refract.datasets import FeatureSet, PrismDataset, ResponseSet
 from refract.metrics import (
@@ -23,14 +20,11 @@ from refract.metrics import (
     get_top_k_features,
 )
 from refract.trainers import XGBoostRankingTrainer
-from refract.utils import torch_dataset_to_numpy_array
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
-SLATE_LENGTH = 10
 NUM_EPOCHS = 1
-NUM_TREES = 100
 
 
 def run(response_path, feature_path, output_dir):
@@ -43,12 +37,13 @@ def run(response_path, feature_path, output_dir):
     logger.addHandler(fh)
 
     # load response data
-    logger.info("Loading respose data...")
+    logger.info("Loading response data...")
     response_set = ResponseSet(response_path)
     response_set.load_response_table()
     response_df = response_set.get_response_df(dose=2.5)
 
     # load feature data
+    logger.info("Loading feature data...")
     feature_set = FeatureSet(feature_path)
     feature_set.load_concatenated_feature_tables()
     feature_df = feature_set.get_feature_df("all")
@@ -56,6 +51,7 @@ def run(response_path, feature_path, output_dir):
     trainers = []
     outer_splitter = KFold(n_splits=10, shuffle=True, random_state=42)
 
+    logger.info("Starting CV training...")
     for idx, (train_val_index, test_index) in enumerate(
         outer_splitter.split(response_df)
     ):
@@ -78,7 +74,9 @@ def run(response_path, feature_path, output_dir):
         ds_val = PrismDataset(val, feature_df, 10)
         ds_test = PrismDataset(test, feature_df, 10)
 
-        trainer = XGBoostRankingTrainer(ds_train, ds_val, ds_test, num_epochs=1)
+        trainer = XGBoostRankingTrainer(
+            ds_train, ds_val, ds_test, num_epochs=NUM_EPOCHS
+        )
 
         trainer.train()
         trainer.compute_stats()
@@ -87,13 +85,16 @@ def run(response_path, feature_path, output_dir):
         trainers.append(trainer)
 
     # compute SHAP values and predictions across full dataset
+    logger.info("Aggregating SHAP values and predictions...")
     shap_values, features, feature_names = get_merged_shap_values_and_features(trainers)
     test_df = get_test_predictions(trainers)
 
     # save test_df to file
+    logger.info("Saving training results to train_results.csv...")
     test_df.to_csv(os.path.join(output_dir, "train_results.csv"), index=False)
 
     # plot a scatter plot of predictions vs actual
+    logger.info("Plotting scatterplot to train_results.png...")
     plt.figure(figsize=(5, 5))
     plt.scatter(test_df["label"], test_df["pred"], alpha=0.5)
     plt.xlabel("LFC")
@@ -102,30 +103,36 @@ def run(response_path, feature_path, output_dir):
     plt.close()
 
     # compute pearson correlation between pred and true
+    logger.info("Computing pearson correlation...")
     train_corr = np.corrcoef(test_df["label"], test_df["pred"])[0, 1]
     logger.info(f"Train correlation: {train_corr}")
     with open(os.path.join(output_dir, "train_corr.txt"), "w") as f:
         f.write(str(train_corr))
 
     # save SHAP summary plot
+    logger.info("Saving SHAP summary plot to shap_summary_plot.png...")
     shap.summary_plot(shap_values, features, feature_names=feature_names, show=False)
     plt.savefig(os.path.join(output_dir, "shap_summary_plot.png"))
     plt.close()
     plt.figure()
 
     # get the gene name of top features
+    logger.info("Getting top features...")
     top_feature_names = get_top_k_features(shap_values, feature_names, k=20)
     top_feature_genes = [i.split("_")[-1] for i in top_feature_names]
 
     # get connectivity of top features
+    logger.info("Getting network interactions...")
     network_interactions, _ = get_stringdb_network_interactions(top_feature_genes)
     network_interactions.to_csv(
         os.path.join(output_dir, "network_interactions.csv"), index=False
     )
 
     # save trainers
+    logger.info("Saving trainers to trainers.pkl...")
     with open(os.path.join(output_dir, "trainers.pkl"), "wb") as f:
         pickle.dump(trainers, f)
+    logger.info("done")
 
 
 if __name__ == "__main__":

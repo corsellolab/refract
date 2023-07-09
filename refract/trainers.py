@@ -20,9 +20,7 @@ from refract.utils import torch_dataset_to_numpy_array
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
-SLATE_LENGTH = 10
-NUM_EPOCHS = 1
-NUM_TREES = 100
+NUM_TREES = 50
 
 
 class XGBoostRankingTrainer:

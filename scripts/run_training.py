@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
 NUM_EPOCHS = 1
+CV_FOLDS = 10
+SLATE_LENGTH = 10
+NUM_TREES = 50
 
 
 def run(response_path, feature_path, output_dir):
@@ -49,7 +52,7 @@ def run(response_path, feature_path, output_dir):
     feature_df = feature_set.get_feature_df("all")
 
     trainers = []
-    outer_splitter = KFold(n_splits=10, shuffle=True, random_state=42)
+    outer_splitter = KFold(n_splits=CV_FOLDS, shuffle=True, random_state=42)
 
     logger.info("Starting CV training...")
     for idx, (train_val_index, test_index) in enumerate(
@@ -58,7 +61,7 @@ def run(response_path, feature_path, output_dir):
         logger.info("Training fold: {}".format(idx))
         train_val = response_df.iloc[train_val_index, :].copy()
         train_index, val_index = next(
-            KFold(n_splits=4, shuffle=True, random_state=42).split(train_val)
+            KFold(n_splits=CV_FOLDS - 1, shuffle=True, random_state=42).split(train_val)
         )
 
         train = train_val.iloc[train_index].copy()
@@ -70,12 +73,12 @@ def run(response_path, feature_path, output_dir):
         assert len(set(train.index).intersection(set(test.index))) == 0
         assert len(set(val.index).intersection(set(test.index))) == 0
 
-        ds_train = PrismDataset(train, feature_df, 10)
-        ds_val = PrismDataset(val, feature_df, 10)
-        ds_test = PrismDataset(test, feature_df, 10)
+        ds_train = PrismDataset(train, feature_df, SLATE_LENGTH)
+        ds_val = PrismDataset(val, feature_df, SLATE_LENGTH)
+        ds_test = PrismDataset(test, feature_df, SLATE_LENGTH)
 
         trainer = XGBoostRankingTrainer(
-            ds_train, ds_val, ds_test, num_epochs=NUM_EPOCHS
+            ds_train, ds_val, ds_test, num_trees=NUM_TREES, num_epochs=NUM_EPOCHS
         )
 
         trainer.train()
@@ -95,11 +98,11 @@ def run(response_path, feature_path, output_dir):
 
     # plot a scatter plot of predictions vs actual
     logger.info("Plotting scatterplot to train_results.png...")
-    plt.figure(figsize=(5, 5))
-    plt.scatter(test_df["label"], test_df["pred"], alpha=0.5)
-    plt.xlabel("LFC")
-    plt.ylabel("Ranking Score")
-    plt.savefig(os.path.join(output_dir, "train_results.png"))
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.scatter(test_df["label"], test_df["pred"], alpha=0.5)
+    ax.set_xlabel("LFC")
+    ax.set_ylabel("Ranking Score")
+    fig.savefig(os.path.join(output_dir, "train_results.png"))
     plt.close()
 
     # compute pearson correlation between pred and true
@@ -114,7 +117,6 @@ def run(response_path, feature_path, output_dir):
     shap.summary_plot(shap_values, features, feature_names=feature_names, show=False)
     plt.savefig(os.path.join(output_dir, "shap_summary_plot.png"))
     plt.close()
-    plt.figure()
 
     # get the gene name of top features
     logger.info("Getting top features...")

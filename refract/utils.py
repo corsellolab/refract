@@ -82,7 +82,7 @@ class LGBMCVConfig(RandomForestNestedCVConfig):
 
 
 ### Functions for creating matrices from Datasets
-def torch_dataset_to_numpy_array(ds, index_only=False, num_epochs=1):
+def torch_dataset_to_numpy_array(ds, num_epochs=1):
     """Load from a Dataset into a numpy array.
 
     Args:
@@ -101,14 +101,11 @@ def torch_dataset_to_numpy_array(ds, index_only=False, num_epochs=1):
             feat = feat.numpy()
             label = label.numpy()
 
-            if index_only:
-                feat = feat[0, :].reshape(1, -1)
-                label = label[0].reshape(1, -1)
-
             features.append(feat)
             labels.append(label)
             groups.append(label.shape)
             ccle_names.append(ccle_name)
+
     features_array = np.concatenate(features, axis=0)
     labels_array = np.concatenate(labels, axis=0)
     group_array = np.array(groups)

@@ -24,8 +24,8 @@ from refract.trainers import XGBoostRankingTrainer
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
-NUM_EPOCHS = 1
-CV_FOLDS = 10
+NUM_EPOCHS = 3
+CV_FOLDS = 5
 SLATE_LENGTH = 10
 NUM_TREES = 50
 
@@ -44,6 +44,9 @@ def run(response_path, feature_path, output_dir):
     response_set = ResponseSet(response_path)
     response_set.load_response_table()
     response_df = response_set.get_response_df(dose=2.5)
+    if len(response_df) < 10:
+        logger.info("Skipping compound with <10 samples")
+        return
 
     # load feature data
     logger.info("Loading feature data...")
@@ -53,6 +56,9 @@ def run(response_path, feature_path, output_dir):
 
     trainers = []
     outer_splitter = KFold(n_splits=CV_FOLDS, shuffle=True, random_state=42)
+
+    all_ds = PrismDataset(response_df.copy(), feature_df, SLATE_LENGTH, sample_feature_p=0.1)
+    feature_cols = all_ds.cols
 
     logger.info("Starting CV training...")
     for idx, (train_val_index, test_index) in enumerate(
@@ -73,9 +79,9 @@ def run(response_path, feature_path, output_dir):
         assert len(set(train.index).intersection(set(test.index))) == 0
         assert len(set(val.index).intersection(set(test.index))) == 0
 
-        ds_train = PrismDataset(train, feature_df, SLATE_LENGTH)
-        ds_val = PrismDataset(val, feature_df, SLATE_LENGTH)
-        ds_test = PrismDataset(test, feature_df, SLATE_LENGTH)
+        ds_train = PrismDataset(train, feature_df, SLATE_LENGTH, col_filter=feature_cols)
+        ds_val = PrismDataset(val, feature_df, SLATE_LENGTH, col_filter=feature_cols)
+        ds_test = PrismDataset(test, feature_df, SLATE_LENGTH, col_filter=feature_cols)
 
         trainer = XGBoostRankingTrainer(
             ds_train, ds_val, ds_test, num_trees=NUM_TREES, num_epochs=NUM_EPOCHS

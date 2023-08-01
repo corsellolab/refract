@@ -54,6 +54,8 @@ class XGBoostRankingTrainer:
         self.test_feature_names = None
 
     def get_model_config(self, config={}):
+        
+        """
         params = {
             "objective": "rank:pairwise",
             "eval_metric": "ndcg",
@@ -65,6 +67,16 @@ class XGBoostRankingTrainer:
             "reg_lambda": 1.0,
             "reg_alpha": 1.0,
             "learning_rate": 0.05,
+            "n_jobs": 8,
+        }
+        """
+        params = {
+            "objective": "rank:pairwise",
+            "eval_metric": "ndcg",
+            "colsample_bytree": 0.5,
+            "colsample_bylevel": 0.5,
+            "colsample_bynode": 0.5,
+            "seed": 42,
             "n_jobs": 8,
         }
         params.update(config)

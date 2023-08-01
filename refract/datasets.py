@@ -8,6 +8,8 @@ import torch
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
 from torch.utils.data import Dataset
+import pandas as pd
+from scipy.stats import pearsonr
 
 from refract.utils import AttrDict
 
@@ -80,25 +82,32 @@ class PrismDataset(Dataset):
         slate_length=10,
         label_transformer=None,
         prioritize_sensitive=True,
+        sample_feature_p=1.0,
+        col_filter=None,
     ):
         self.response_df = response_df
         self.feature_df = feature_df
         self.slate_length = slate_length
         self.prioritize_sensitive = prioritize_sensitive
+        self.sample_feature_p = sample_feature_p
 
         # quantile transform labels
         self.response_df["unscaled_response"] = self.response_df["response"].values
+
         if not label_transformer:
             self.label_transformer = MinMaxScaler()
         else:
             self.label_transformer = label_transformer
+
         self.response_df["response"] = self.label_transformer.fit_transform(
             self.response_df[["response"]]
         )
+
         if self.prioritize_sensitive:
             self.response_df.loc[:, "response"] = (
                 1 - self.response_df.loc[:, "response"]
             )
+
         # scale from 0 to 5
         self.response_df.loc[:, "response"] = self.response_df.loc[:, "response"] * 5
 
@@ -117,6 +126,13 @@ class PrismDataset(Dataset):
 
         # get ccle_names
         self.ccle_names = self.joined_df.index.tolist()
+
+        # Filter feature columns
+        if not col_filter:
+            self.joined_df = self.filter_dataframe(self.joined_df, "response", self.sample_feature_p)
+        else:
+            self.joined_df = self.joined_df.loc[:, col_filter]
+        self.cols = self.joined_df.columns.tolist()
 
         # threshold slate_length, edge case
         if len(self.ccle_names) < self.slate_length:
@@ -141,3 +157,21 @@ class PrismDataset(Dataset):
         labels = torch.tensor(samples.iloc[:, -1].values.squeeze(), dtype=torch.float32)
 
         return ccle_name, features, labels
+    
+    def filter_dataframe(self, df, response, p):
+        # Compute the correlation of each column with the response column
+        correlations = df.apply(lambda col: pearsonr(col, df[response])[0] if col.name != response else None)
+
+        # Get the type of each column from its name
+        types = pd.Series([col.split('_')[0] for col in df.columns if col != response], index=[col for col in df.columns if col != response])
+
+        # Combine the correlations and types into a single DataFrame
+        correlations_and_types = pd.DataFrame({'correlation': correlations, 'type': types})
+
+        # Sort the correlations within each type group in descending order and select the top p percent
+        top_features = correlations_and_types.groupby('type').apply(lambda group: group.nlargest(int(len(group)*p), 'correlation')).reset_index(level=0, drop=True)
+
+        # Select only the columns of the original dataframe that are in the top features
+        filtered_df = df[list(top_features.index) + [response]]
+
+        return filtered_df

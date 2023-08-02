@@ -5,10 +5,10 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from scipy.stats import pearsonr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
 from torch.utils.data import Dataset
-from scipy.stats import pearsonr
 
 from refract.utils import AttrDict
 

@@ -1,9 +1,9 @@
 from typing import Dict, List
-from scipy.stats import pearsonr
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 from pydantic import BaseModel
+from scipy.stats import pearsonr
 
 
 class AttrDict(dict):
@@ -82,21 +82,27 @@ class LGBMCVConfig(RandomForestNestedCVConfig):
     }
     n_jobs: int = 10
 
+
 def get_top_features(response_df, feature_df, response_col, p):
-        df = response_df.merge(feature_df, on="ccle_name")
-        df_features = df.loc[:, feature_df.columns]
-        series_response = df.loc[:, response_col]
+    df = response_df.merge(feature_df, on="ccle_name")
+    df_features = df.loc[:, feature_df.columns]
+    series_response = df.loc[:, response_col]
 
-        corrs = []
-        for col in df_features.columns:
-            c = pearsonr(df_features[col], series_response)[0]
-            feature_type = col.split("_")[0]
-            corrs.append({"corr": c, "feature_type": feature_type, "feature": col})
+    corrs = []
+    for col in df_features.columns:
+        c = pearsonr(df_features[col], series_response)[0]
+        feature_type = col.split("_")[0]
+        corrs.append({"corr": c, "feature_type": feature_type, "feature": col})
 
-        corr_df = pd.DataFrame(corrs)
-        top_correlated = corr_df.groupby("feature_type").apply(lambda group: group.nlargest(int(len(group)*p), "corr")).reset_index(level=0, drop=True)
+    corr_df = pd.DataFrame(corrs)
+    top_correlated = (
+        corr_df.groupby("feature_type")
+        .apply(lambda group: group.nlargest(int(len(group) * p), "corr"))
+        .reset_index(level=0, drop=True)
+    )
 
-        return top_correlated.feature.tolist()
+    return top_correlated.feature.tolist()
+
 
 def dataset_to_group_df(ds, num_epochs):
     features = []

@@ -1,11 +1,13 @@
 import os
 import pickle
 import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import shap
 from sklearn.model_selection import KFold
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import argparse
 import logging
@@ -19,16 +21,17 @@ from refract.metrics import (
     get_test_predictions,
     get_top_k_features,
 )
-from refract.utils import get_top_features
 from refract.trainers import XGBoostRankingTrainer
+from refract.utils import get_top_features
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
 SLATE_LENGTH = 10
-NUM_TREES = 200 
+NUM_TREES = 200
 NUM_EPOCHS = 100
 CV_FOLDS = 5
+
 
 def dataset_to_group_df(ds):
     features = []
@@ -49,6 +52,7 @@ def dataset_to_group_df(ds):
 
     return group_train_features, group_train_labels, groups
 
+
 def dataset_to_individual_df(ds):
     features = []
     labels = []
@@ -63,6 +67,7 @@ def dataset_to_individual_df(ds):
     individual_train_features = np.concatenate(features, axis=0)
     individual_train_labels = np.array(labels)
     return individual_train_features, individual_train_labels, ccle_names
+
 
 def run(response_path, feature_path, output_dir):
     # create output dir
@@ -103,19 +108,19 @@ def run(response_path, feature_path, output_dir):
             response_train.copy(),
             feature_df,
             slate_length=SLATE_LENGTH,
-            feature_cols=top_features
+            feature_cols=top_features,
         )
         ds_val = PrismDataset(
             response_val.copy(),
             feature_df,
             slate_length=SLATE_LENGTH,
-            feature_cols=top_features
+            feature_cols=top_features,
         )
         ds_test = PrismDataset(
             response_test.copy(),
             feature_df,
             slate_length=SLATE_LENGTH,
-            feature_cols=top_features
+            feature_cols=top_features,
         )
 
         # train one fold
@@ -178,6 +183,7 @@ def run(response_path, feature_path, output_dir):
     with open(os.path.join(output_dir, "trainers.pkl"), "wb") as f:
         pickle.dump(trainers, f)
     logger.info("done")
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()

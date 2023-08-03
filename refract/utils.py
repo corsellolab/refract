@@ -91,6 +91,8 @@ def get_top_features(response_df, feature_df, response_col, p):
     corrs = []
     for col in df_features.columns:
         c = pearsonr(df_features[col], series_response)[0]
+        # get absolute value of c
+        c = abs(c)
         feature_type = col.split("_")[0]
         corrs.append({"corr": c, "feature_type": feature_type, "feature": col})
 

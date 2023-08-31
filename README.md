@@ -1,7 +1,6 @@
 # Refract
-## A python implementation of MTS analysis
 
-Temporary working title. Extending the PRISM motif.
+Ranking models for analysis of PRISM multiplexed cell-line datasets.
 
 ## Setup
 Setup a conda environment: 
@@ -13,11 +12,8 @@ conda activate corlab
 ## Usage
 Baseline model training: 
 ```
-python scripts/runCVRFTrain.py \
-    --feature_dir <path_to_feature_directory> \
+python scripts/run_training.py \
     --response_path <path_to_response_csv> \
-    --output_dir <path_to_output_root> \
-    --config_path <path_to_config_json> (optional)
+    --feature_path <path_to_feature_pkl_file> \
+    --output_dir <output_directory>
 ```
-
-See `refract/utils.py` for optional configurations. 

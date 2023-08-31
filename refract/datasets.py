@@ -5,6 +5,7 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from scipy.stats import pearsonr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
 from torch.utils.data import Dataset
@@ -185,38 +186,19 @@ class PrismDataset(Dataset):
         self,
         response_df,
         feature_df,
-        feature_importance_df,
-        top_k_features,
         slate_length,
+        feature_cols,
         feature_transformer=None,
         label_transformer=None,
-        prioritize_sensitive=True,
     ):
         self.response_df = response_df
+        self.unscaled_response_df = response_df.copy()
         self.feature_df = feature_df
-        self.feature_importance_df = feature_importance_df
-        self.top_k_features = top_k_features
         self.slate_length = slate_length
-        self.prioritize_sensitive = prioritize_sensitive
-
-        # Get the top k features based on importance
-        self.top_features = self.feature_importance_df.nsmallest(
-            top_k_features * 2, "rank"
-        )["feature"].tolist()
-
-        # HACK: due to mismatches in the feature names between the feature importance
-        # cannot guarantee that all top features are in the feature_df
-        # get approximately the top_k_features, but not more
-        self.top_features = [
-            i for i in self.top_features if i in self.feature_df.columns
-        ]
-        self.top_features = list(set(self.top_features))
-        # for reproducibility, sort the features
-        self.top_features.sort()
-        self.top_features = self.top_features[:top_k_features]
+        self.top_features = feature_cols
 
         # filter self.feature_df to include only the top features
-        self.feature_df = self.feature_df.loc[:, self.top_features]
+        self.feature_df = self.feature_df.loc[:, self.top_features].copy()
 
         # quantile transform all features
         if not feature_transformer:
@@ -232,7 +214,7 @@ class PrismDataset(Dataset):
             index=self.feature_df.index,
         )
 
-        # quantile transform labels
+        # MinMax transform labels
         if not label_transformer:
             self.label_transformer = MinMaxScaler()
         else:
@@ -240,13 +222,14 @@ class PrismDataset(Dataset):
         self.response_df["LFC.cb"] = self.label_transformer.fit_transform(
             self.response_df[["LFC.cb"]]
         )
-        if self.prioritize_sensitive:
-            self.response_df.loc[:, "LFC.cb"] = 1 - self.response_df.loc[:, "LFC.cb"]
+        self.response_df.loc[:, "LFC.cb"] = 1 - self.response_df.loc[:, "LFC.cb"]
+
         # scale from 0 to 5
         self.response_df.loc[:, "LFC.cb"] = self.response_df.loc[:, "LFC.cb"] * 5
 
         # Join response_df and feature_df on "ccle_name"
         self.joined_df = pd.merge(self.response_df, self.feature_df, on="ccle_name")
+
         # set index to "ccle_name"
         self.joined_df = self.joined_df.set_index("ccle_name")
 

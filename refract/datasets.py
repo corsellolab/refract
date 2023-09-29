@@ -57,21 +57,6 @@ class FeatureSet:
             f"{self.feature_dir}/rep.csv", index_col=0
         )
 
-        # repurposing meta table requires some formatting
-        # repurposing_meta = pd.read_csv(f"{self.feature_dir}/rep_info.csv")
-        # format the repurposing_meta table
-        # repurposing_meta["column_name"] = "REP_" + repurposing_meta[
-        #    "column_name"
-        # ].astype(str)
-        # repurposing_meta["name"] = (
-        #    repurposing_meta["name"]
-        #    .astype(str)
-        #    .apply(lambda x: re.sub(r"[^\w\s]", "-", x))
-        # )
-        # remove columns
-        # repurposing_meta = repurposing_meta.drop(columns=["dose", "screen_id"])
-        # self.feature_tables["repurposing_meta"] = repurposing_meta
-
         self.continuous_features = {
             "GE": self.feature_tables.GE,
             "CNA": self.feature_tables.CNA,
@@ -88,23 +73,6 @@ class FeatureSet:
         }
 
     def load_concatenated_feature_tables(self):
-        """
-        X_all = pd.read_csv(f"{self.feature_dir}/x-all.csv")
-        X_all = X_all.set_index(X_all.columns[0])
-        X_all.index.name = "ccle_name"
-        # remove duplicate rows and columns
-        X_all = X_all.drop_duplicates()
-        X_all = X_all.loc[:, list(set(X_all.columns))]
-        self.feature_tables["all"] = X_all
-
-        X_ccle = pd.read_csv(f"{self.feature_dir}/x-ccle.csv")
-        X_ccle = X_ccle.set_index(X_ccle.columns[0])
-        X_ccle.index.name = "ccle_name"
-        # remove duplicate rows and columns
-        X_ccle = X_ccle.drop_duplicates()
-        X_ccle = X_ccle.loc[:, list(set(X_ccle.columns))]
-        self.feature_tables["ccle"] = X_ccle
-        """
         X_all = pd.read_pickle(f"{self.feature_dir}/x-all.pkl")
         X_all.index.name = "ccle_name"
         # remove duplicate rows and columns

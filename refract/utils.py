@@ -189,7 +189,7 @@ def save_output(trainers, output_dir):
     # compute pearson correlation between pred and true
     logger.info("Computing pearson correlation...")
     train_corr = np.corrcoef(test_df["label"], test_df["pred"])[0, 1]
-    logger.info(f"Train correlation: {train_corr}")
+    logger.info(f"Overall test correlation: {train_corr}")
     with open(os.path.join(output_dir, "train_corr.txt"), "w") as f:
         f.write(str(train_corr))
 

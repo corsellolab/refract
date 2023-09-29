@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
 SLATE_LENGTH = 10
-NUM_EPOCHS = 300
+NUM_EPOCHS = 100
 CV_FOLDS = 5
 
 

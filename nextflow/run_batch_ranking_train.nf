@@ -1,13 +1,13 @@
 params.response_dir = '/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/primary_23q2'
 params.feature_path = '/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/features/v2_x-all.pkl'
-params.output_path = '/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/output'
+params.output_path = '/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/expanded_sample_optimization'
 params.dev = false
 
 process train_rank {
     errorStrategy { task.attempt < 2 ? 'retry' : 'ignore' }
-    cpus { 12 * task.attempt }
-    memory { 48.GB * task.attempt }
-    time { 1.hour * task.attempt }
+    cpus { 8 * task.attempt }
+    memory { 16.GB * task.attempt }
+    time { 2.hour * task.attempt }
     executor 'slurm'
     conda '/home/groups/dkurtz/tools/conda/miniconda3/envs/corlab'
     publishDir "${params.output_path}", mode: 'copy'
@@ -25,7 +25,7 @@ process train_rank {
 }
 
 workflow {
-    csvChannel = Channel.fromPath("/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/optimize_frac.csv")
+    csvChannel = Channel.fromPath("/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/expanded_optimize_frac.csv")
         .splitCsv(header: true, sep: ',')
         .map { row -> [row.drug, row.path, row.frac] }
     

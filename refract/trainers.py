@@ -46,10 +46,10 @@ class XGBoostRankingTrainer:
     def get_model_config(self, config={}):
         params = {
             "objective": "rank:pairwise",
-            #"colsample_bytree": 0.5,
-            #"colsample_bylevel": 0.5,
-            #"colsample_bynode": 0.5,
-            #"max_depth": 2,
+            # "colsample_bytree": 0.5,
+            # "colsample_bylevel": 0.5,
+            # "colsample_bynode": 0.5,
+            # "max_depth": 2,
             "seed": 42,
         }
         params.update(config)
@@ -107,7 +107,9 @@ class XGBoostRankingTrainer:
         smoothed_val_corr = moving_window_average(val_corr, 5)
         best_val_corr_idx = np.argmax(smoothed_val_corr)
         logger.info("    Best val corr idx: {}".format(best_val_corr_idx))
-        logger.info("    Best val corr: {}".format(smoothed_val_corr[best_val_corr_idx]))
+        logger.info(
+            "    Best val corr: {}".format(smoothed_val_corr[best_val_corr_idx])
+        )
         self.xgb_model = models[best_val_corr_idx]
 
         # get train, val, test preds

@@ -50,9 +50,6 @@ def run(
     logger.info("Loading response data...")
     response_df = pd.read_csv(response_path)
 
-    # get the top 1% of features
-    top_features = get_top_features(response_df, feature_df, "LFC.cb", feature_fraction)
-
     # START CV TRAIN
     splitter = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
@@ -70,6 +67,11 @@ def run(
             response_train_val.iloc[val_index, :].reset_index(drop=True).copy()
         )
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
+
+        # feature selection
+        top_features = get_top_features(
+            response_train, feature_df, "LFC.cb", feature_fraction
+        )
 
         # load datasets
         ds_train = PrismDataset(

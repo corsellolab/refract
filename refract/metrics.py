@@ -39,18 +39,25 @@ def get_stringdb_network_interactions(gene_list):
 
 def get_merged_shap_values_and_features(trainer_list):
     """Aggregate SHAP values and features from multiple trainers."""
-    all_shap_values = []
-    all_features = []
-    feature_names = []
-    for trainer in trainer_list:
-        all_shap_values.append(trainer.shap_values)
-        all_features.append(trainer.test_features)
-        feature_names.append(trainer.test_feature_names)
-    all_shap_values = np.concatenate(all_shap_values, axis=0)
-    all_features = np.concatenate(all_features, axis=0)
-    # verify all feature names are the same
-    assert all([x == feature_names[0] for x in feature_names])
-    return all_shap_values, all_features, feature_names[0]
+    # get the shap values and features from each trainer
+    shap_dfs = [
+        pd.DataFrame(i.shap_values, columns=i.test_feature_names) for i in trainer_list
+    ]
+    feature_dfs = [
+        pd.DataFrame(i.test_features, columns=i.test_feature_names)
+        for i in trainer_list
+    ]
+
+    # concatenate
+    shap_df = pd.concat(shap_dfs, axis=0)
+    feature_df = pd.concat(feature_dfs, axis=0)
+
+    # fill in the missing values with 0
+    shap_df = shap_df.fillna(0)
+    feature_df = feature_df.fillna(0)
+
+    # return as numpy arrays
+    return shap_df.values, feature_df.values, feature_df.columns
 
 
 def get_top_k_features(merged_shap_values, feature_names, k=20):

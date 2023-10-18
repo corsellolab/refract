@@ -1,182 +1,196 @@
 # trainer for the XGBoost ranking model
 import logging
+from functools import partial
 
+import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
+import optuna
 import pandas as pd
 import shap
 import xgboost as xgb
+from scipy.stats import pearsonr
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from refract.utils import (
-    dataset_to_group_df,
-    dataset_to_individual_df,
-    moving_window_average,
-)
+from refract.utils import get_top_features
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
 
-class XGBoostRankingTrainer:
-    """Trains an XGBoost ranking model"""
+class LGBMTrainer:
+    """Trains a LGBM Regression Model"""
 
-    def __init__(self, train_ds, val_ds, test_ds, num_epochs, model_config={}):
-        self.train_ds = train_ds
-        self.val_ds = val_ds
-        self.test_ds = test_ds
-        self.num_epochs = num_epochs
-        self.model_config = model_config
+    def __init__(
+        self,
+        response_train,
+        response_test,
+        feature_df,
+        response_col="LFC.cb",
+        cell_line_col="ccle_name",
+        num_hyp_trials=200,
+        feature_fraction=0.03,
+    ):
+        self.response_train = response_train
+        self.response_test = response_test
+        self.feature_df = feature_df
+        self.response_col = response_col
+        self.cell_line_col = cell_line_col
+        self.num_hyp_trials = num_hyp_trials
+        self.feature_fraction = feature_fraction
 
-        # training stats
-        self.train_corr = None
-        self.train_results_df = None
-        self.val_corr = None
-        self.val_results_df = None
-        self.test_corr = None
-        self.test_results_df = None
-        self.xgb_model = None
+        self.top_feature_names = None
+        self.best_params = None
+        self.lgbm_model = None
 
-        # only save test labels and preds to save space
-        # needed for SHAP
-        self.shap_values = None
-        self.test_features = None
-        self.test_feature_names = None
+        self.X_train_val = None
+        self.y_train_val = None
+        self.X_test = None
+        self.X_test_df = None
+        self.y_test = None
+        self.cell_line_train_val = None
+        self.cell_line_test = None
 
-    def get_model_config(self, config={}):
+        self.y_test_pred = None
+        self.shap_df = None
+
+    def top_n_feature_indices(self, rf_model, n):
+        # get feature importances
+        importances = rf_model.feature_importances_
+        # get the indices of the top n features
+        indices = sorted(
+            range(len(importances)), key=lambda i: importances[i], reverse=True
+        )[:n]
+        return indices
+
+    def train_ranker(self, X_train, y_train, params, X_val=None, y_val=None):
+        # set label weight
+        weighting = params["weighting"]
+        if weighting == 0:
+            train_data = lgb.Dataset(X_train, label=y_train)
+        else:
+            num_bins = 1000
+            bins = np.linspace(y_train.min(), y_train.max(), num=num_bins)
+            y_train_weight = (
+                np.abs(
+                    np.digitize(y_train, bins) - np.median(np.digitize(y_train, bins))
+                )
+                ** params["weighting"]
+            )
+            # create training dataset
+            train_data = lgb.Dataset(X_train, label=y_train, weight=y_train_weight)
+
+        # train model
+        bst = lgb.train(params, train_data)
+
+        if X_val and y_val:
+            # compute validation pearson correlation
+            val_corr = pearsonr(y_val, bst.predict(X_val))[0]
+            return bst, val_corr
+        else:
+            return bst
+
+    def _trial_objective(self, trial, X_train, y_train):
         params = {
-            "objective": "rank:pairwise",
-            # "colsample_bytree": 0.5,
-            # "colsample_bylevel": 0.5,
-            # "colsample_bynode": 0.5,
-            # "max_depth": 2,
-            "seed": 42,
+            "objective": "regression",
+            "metric": "l2",
+            "verbosity": -1,
+            "weighting": trial.suggest_int("weighting", 0, 2),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+            "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
+            "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
+            "num_leaves": trial.suggest_int("num_leaves", 2, 256),
+            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 2, 50),
+            "max_depth": trial.suggest_int("max_depth", 1, 20),
+            "num_boost_round": trial.suggest_int("num_boost_round", 50, 1000),
         }
-        params.update(config)
-        return params
+
+        ranker_corrs = []
+        for _ in range(5):
+            _, val_corr = self._train_ranker(X_train, y_train, params, val_set=True)
+            ranker_corrs.append(val_corr)
+        return np.mean(ranker_corrs)
 
     def train(self):
-        # get grouped training features
-        logger.info("    Generating slates...")
-        # get train, val, test features
-        train_features, train_labels, train_ccle_names = dataset_to_individual_df(
-            self.train_ds
+        ### STAGE 1: get correlated features
+        # compute the top features
+        train_idx, val_idx = train_test_split(self.response_train, test_size=0.2)
+        response_train = self.response_train.iloc[train_idx, :].copy()
+        response_val = self.response_train.iloc[val_idx, :].copy()
+        response_test = self.response_test.copy()
+
+        y_train = response_train[self.response_col].values
+        cell_line_train = response_train[self.cell_line_col].values
+        y_val = response_val[self.response_col].values
+        cell_line_val = response_val[self.cell_line_col].values
+        self.y_train_val = np.concatenate([y_train, y_val])
+        self.cell_line_train_val = np.concatenate([cell_line_train, cell_line_val])
+        self.y_test = response_test[self.response_col].values
+        self.cell_line_test = response_test[self.cell_line_col].values
+
+        top_features = get_top_features(
+            response_train,
+            self.feature_df,
+            self.response_col,
+            self.feature_fraction,
+            n_jobs=4,
         )
-        val_features, val_labels, val_ccle_names = dataset_to_individual_df(self.val_ds)
-        test_features, test_labels, test_ccle_names = dataset_to_individual_df(
-            self.test_ds
+        top_features_df = self.feature_df.loc[:, top_features]
+
+        ### STAGE 2: random forest regression
+        X_train = top_features_df.loc[cell_line_train, :].values
+
+        # fit a random forest regressor object
+        rf = RandomForestRegressor(n_estimators=500, random_state=42, n_jobs=4)
+        rf.fit(X_train, y_train)
+
+        top_features = self.top_n_feature_indices(rf, 200)
+        self.top_feature_names = top_features
+        first_stage_top_features_df = top_features_df.iloc[:, top_features]
+
+        #### STAGE 3: fit LGBM model on top features
+        self.X_train_val = first_stage_top_features_df.loc[
+            self.cell_line_train_val, :
+        ].values
+        X_train = first_stage_top_features_df.loc[cell_line_train, :].values
+        X_val = first_stage_top_features_df.loc[cell_line_val, :].values
+        self.X_test = first_stage_top_features_df.loc[self.cell_line_test, :].values
+
+        # optimize hyperparameters
+        study = optuna.create_study(direction="maximize")
+        obj = partial(
+            self._trial_objective,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
         )
+        study.optimize(obj, n_trials=self.num_hyp_trial)
 
-        # convert the data to DMatrix
-        logger.info("    Converting to DMatrix...")
-        train_dmatrix = xgb.DMatrix(train_features, label=train_labels)
-        val_dmatrix = xgb.DMatrix(val_features, label=val_labels)
-        test_dmatrix = xgb.DMatrix(test_features, label=test_labels)
+        # get best params
+        trial = study.best_trial
+        self.best_params = trial.params
 
-        # get model params
-        params = self.get_model_config(self.model_config)
-
-        # train
-        models = []
-        val_corr = []
-        logger.info("    Incremental training...")
-        for _ in tqdm(range(self.num_epochs)):
-            # get one training epoch
-            group_train_features, group_train_labels, groups = dataset_to_group_df(
-                self.train_ds, 1
-            )
-            # format for training
-            group_train_dmatrix = xgb.DMatrix(
-                group_train_features, label=group_train_labels, group=groups
-            )
-            if not self.xgb_model:
-                self.xgb_model = xgb.train(
-                    params, group_train_dmatrix, num_boost_round=1
-                )
-            else:
-                self.xgb_model = xgb.train(
-                    params,
-                    group_train_dmatrix,
-                    num_boost_round=1,
-                    xgb_model=self.xgb_model,
-                )
-            val_preds = self.xgb_model.predict(val_dmatrix)
-            val_corr.append(np.corrcoef(val_preds, val_labels)[0, 1])
-            models.append(self.xgb_model)
-
-        smoothed_val_corr = moving_window_average(val_corr, 5)
-        best_val_corr_idx = np.argmax(smoothed_val_corr)
-        logger.info("    Best val corr idx: {}".format(best_val_corr_idx))
-        logger.info(
-            "    Best val corr: {}".format(smoothed_val_corr[best_val_corr_idx])
-        )
-        self.xgb_model = models[best_val_corr_idx]
-
-        # get train, val, test preds
-        self.train_preds = self.xgb_model.predict(train_dmatrix)
-        self.val_preds = self.xgb_model.predict(val_dmatrix)
-        self.test_preds = self.xgb_model.predict(test_dmatrix)
-
-        # store as dataframes
-        self.train_results_df = pd.DataFrame(
-            {
-                "ccle_name": train_ccle_names,
-                "preds": -1 * self.train_preds,
-            }
-        )
-        self.val_results_df = pd.DataFrame(
-            {
-                "ccle_name": val_ccle_names,
-                "preds": -1 * self.val_preds,
-            }
-        )
-        self.test_results_df = pd.DataFrame(
-            {
-                "ccle_name": test_ccle_names,
-                "preds": -1 * self.test_preds,
-            }
+        # train the model with best params and all data
+        self.lgbm_model = self._train_ranker(
+            self.X_train_val, self.y_train_val, self.best_params
         )
 
-        # join to get unscaled responses
-        unscaled_train = self.train_ds.unscaled_response_df.loc[
-            :, ["ccle_name", "LFC.cb"]
-        ]
-        unscaled_val = self.val_ds.unscaled_response_df.loc[:, ["ccle_name", "LFC.cb"]]
-        unscaled_test = self.test_ds.unscaled_response_df.loc[
-            :, ["ccle_name", "LFC.cb"]
-        ]
+        # predict
+        self.y_test_pred = self.predict(self.X_test)
 
-        self.train_results_df = self.train_results_df.merge(
-            unscaled_train, on="ccle_name"
-        )
-        self.val_results_df = self.val_results_df.merge(unscaled_val, on="ccle_name")
-        self.test_results_df = self.test_results_df.merge(unscaled_test, on="ccle_name")
+        # compute shap values
+        self.shap_df = self.compute_shap_values(self.X_test)
+        # set X_test_df
+        self.X_test_df = first_stage_top_features_df.loc[self.cell_line_test, :]
 
-        # compute correlations
-        self.train_corr = np.corrcoef(
-            self.train_results_df["LFC.cb"], self.train_results_df.preds
-        )[0, 1]
-        self.val_corr = np.corrcoef(
-            self.val_results_df["LFC.cb"], self.val_results_df.preds
-        )[0, 1]
-        self.test_corr = np.corrcoef(
-            self.test_results_df["LFC.cb"], self.test_results_df.preds
-        )[0, 1]
-        logger.info("    Train corr: {}".format(self.train_corr))
-        logger.info("    Val corr: {}".format(self.val_corr))
-        logger.info("    Test corr: {}".format(self.test_corr))
+    def predict(self, X):
+        return self.model.predict(X)
 
-        # get SHAP values
-        explainer = shap.TreeExplainer(self.xgb_model)
-        self.shap_values = explainer.shap_values(test_features)
-        self.test_features = self.test_ds.joined_df.iloc[:, :-1].values
-        self.test_feature_names = self.test_ds.top_features
-
-        # free up some memory
-        del group_train_dmatrix
-        del train_dmatrix
-        del val_dmatrix
-        del test_dmatrix
-        self.train_ds = None
-        self.val_ds = None
-        self.test_ds = None
+    def compute_shap_values(self, X):
+        explainer = shap.TreeExplainer(self.lgbm_model)
+        shap_values = explainer.shap_values(X)
+        shap_df = pd.DataFrame(shap_values, columns=self.top_feature_names)
+        return shap_df

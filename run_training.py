@@ -12,15 +12,13 @@ import xgboost as xgb
 from sklearn.model_selection import KFold
 
 from refract.datasets import PrismDataset
-from refract.trainers import XGBoostRankingTrainer
+from refract.trainers import LGBMTrainer
 from refract.utils import get_top_features, save_output
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
-SLATE_LENGTH = 10
-NUM_EPOCHS = 100
-CV_FOLDS = 5
+CV_FOLDS = 10
 
 
 def run(
@@ -28,8 +26,6 @@ def run(
     feature_path,
     output_dir,
     feature_fraction,
-    slate_length=SLATE_LENGTH,
-    num_epochs=NUM_EPOCHS,
     cv_folds=CV_FOLDS,
 ):
     # create output dir
@@ -53,52 +49,17 @@ def run(
     # START CV TRAIN
     splitter = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
-    for i, (train_val_index, test_index) in enumerate(splitter.split(response_df)):
+    for i, (train_index, test_index) in enumerate(splitter.split(response_df)):
         logger.info(f"Training fold {i}")
-        response_train_val = (
-            response_df.iloc[train_val_index, :].reset_index(drop=True).copy()
-        )
-        train_val_splitter = KFold(n_splits=cv_folds - 1, shuffle=True, random_state=42)
-        train_index, val_index = next(train_val_splitter.split(response_train_val))
-        response_train = (
-            response_train_val.iloc[train_index, :].reset_index(drop=True).copy()
-        )
-        response_val = (
-            response_train_val.iloc[val_index, :].reset_index(drop=True).copy()
-        )
+        response_train = response_df.iloc[train_index, :].reset_index(drop=True).copy()
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
 
-        # feature selection
-        top_features = get_top_features(
-            response_train, feature_df, "LFC.cb", feature_fraction
-        )
-
-        # load datasets
-        ds_train = PrismDataset(
-            response_train,
-            feature_df,
-            slate_length=slate_length,
-            feature_cols=top_features,
-        )
-        ds_val = PrismDataset(
-            response_val,
-            feature_df,
-            slate_length=slate_length,
-            feature_cols=top_features,
-        )
-        ds_test = PrismDataset(
-            response_test,
-            feature_df,
-            slate_length=slate_length,
-            feature_cols=top_features,
-        )
-
         # train one fold
-        trainer = XGBoostRankingTrainer(
-            train_ds=ds_train,
-            val_ds=ds_val,
-            test_ds=ds_test,
-            num_epochs=num_epochs,
+        trainer = LGBMTrainer(
+            response_train=response_train,
+            response_test=response_test,
+            feature_df=feature_df,
+            feature_fraction=feature_fraction,
         )
         trainer.train()
         trainers.append(trainer)

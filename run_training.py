@@ -46,6 +46,15 @@ def run(
     logger.info("Loading response data...")
     response_df = pd.read_csv(response_path)
 
+    # only keep cell lines we have features for
+    available_ccle_names = set(feature_df.index)
+    response_df = response_df[response_df["ccle_name"].isin(available_ccle_names)]
+
+    # drop culture column
+    response_df = response_df.drop(columns=["culture"])
+    # drop duplicates by ccle_name, keep first
+    response_df = response_df.drop_duplicates(subset=["ccle_name"], keep="first")
+
     # START CV TRAIN
     splitter = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
@@ -61,7 +70,9 @@ def run(
             feature_df=feature_df,
             feature_fraction=feature_fraction,
         )
-        trainer.train()
+        trainer.train_first_stage()
+        trainer.hyperparameter_optimization()
+        trainer.train_second_stage()
         trainers.append(trainer)
         ### END CV TRAIN
 

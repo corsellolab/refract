@@ -138,7 +138,7 @@ class LGBMTrainer:
 
     def hyperparameter_optimization(self):
         # hyperparameter sweep with optuna
-        study = optuna.create_study(direction="maximize")
+        study = optuna.create_study(direction="minimize")
         study.optimize(self._optuna_objective, n_trials=self.num_hyp_trials)
         self.best_params = study.best_trial.params
 

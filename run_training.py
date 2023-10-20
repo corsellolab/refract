@@ -70,6 +70,7 @@ def run(
             feature_df=feature_df,
             feature_fraction=feature_fraction,
         )
+        trainer.get_correlated_features()
         trainer.train_first_stage()
         trainer.hyperparameter_optimization()
         trainer.train_second_stage()

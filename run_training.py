@@ -9,17 +9,16 @@ import numpy as np
 import pandas as pd
 import shap
 import xgboost as xgb
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 
 from refract.datasets import PrismDataset
-from refract.trainers import LGBMTrainer
+from refract.trainers import RFTrainer
 from refract.utils import get_top_features, save_output
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
 CV_FOLDS = 10
-
 
 def run(
     response_path,
@@ -55,25 +54,25 @@ def run(
     # drop duplicates by ccle_name, keep first
     response_df = response_df.drop_duplicates(subset=["ccle_name"], keep="first")
 
+    # add quantile bins
+    response_df['quantile_bins'] = pd.qcut(response_df['LFC.cb'], q=10, labels=False)
+
     # START CV TRAIN
-    splitter = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
-    for i, (train_index, test_index) in enumerate(splitter.split(response_df)):
+    for i, (train_index, test_index) in enumerate(skf.split(response_df, response_df["quantile_bins"])):
         logger.info(f"Training fold {i}")
         response_train = response_df.iloc[train_index, :].reset_index(drop=True).copy()
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
 
         # train one fold
-        trainer = LGBMTrainer(
+        trainer = RFTrainer(
             response_train=response_train,
             response_test=response_test,
             feature_df=feature_df,
             feature_fraction=feature_fraction,
         )
-        trainer.get_correlated_features()
-        trainer.train_first_stage()
-        trainer.hyperparameter_optimization()
-        trainer.train_second_stage()
+        trainer.train()
         trainers.append(trainer)
         ### END CV TRAIN
 

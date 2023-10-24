@@ -19,8 +19,38 @@ from refract.utils import get_top_features
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
+def get_correlated_features(y, X, colnames, p):
+    # Step 1: Compute the correlation for each column
+    correlations = np.array([np.corrcoef(y, X[:, i])[0, 1] for i in range(X.shape[1])])
+    
+    # Step 2: Group columns by TYPE
+    type_dict = {}
+    for i, colname in enumerate(colnames):
+        type_name = colname.split("_")[0]
+        if type_name not in type_dict:
+            type_dict[type_name] = []
+        type_dict[type_name].append((correlations[i], colname))
+    
+    # Step 3: Sample the top p proportion of correlated features within each type
+    selected_colnames = []
+    for type_name in type_dict:
+        if type_name != "LIN":
+            sorted_correlations = sorted(type_dict[type_name], key=lambda x: -abs(x[0]))  # sort by absolute correlation value in descending order
+            top_p_count = int(p * len(sorted_correlations))
+            top_p_colnames = [colname for _, colname in sorted_correlations[:top_p_count]]
+            selected_colnames.extend(top_p_colnames)
+        else:
+            sorted_correlations = sorted(type_dict[type_name], key=lambda x: -abs(x[0]))  # sort by absolute correlation value in descending order
+            top_p_count = int(p * len(sorted_correlations))
+            top_p_colnames = [colname for _, colname in sorted_correlations]
+            selected_colnames.extend(top_p_colnames)
 
-class LGBMTrainer:
+    
+    # Step 4: Return the list of column names
+    return selected_colnames
+
+
+class RFTrainer:
     """Trains a LGBM Regression Model"""
 
     def __init__(
@@ -30,7 +60,6 @@ class LGBMTrainer:
         feature_df,
         response_col="LFC.cb",
         cell_line_col="ccle_name",
-        num_hyp_trials=200,
         feature_fraction=0.03,
     ):
         self.response_train = response_train
@@ -38,12 +67,10 @@ class LGBMTrainer:
         self.feature_df = feature_df
         self.response_col = response_col
         self.cell_line_col = cell_line_col
-        self.num_hyp_trials = num_hyp_trials
         self.feature_fraction = feature_fraction
 
         self.top_feature_names = None
-        self.best_params = None
-        self.lgbm_model = None
+        self.model = None
 
         self.X_test_df = None
         self.y_test = None
@@ -52,140 +79,44 @@ class LGBMTrainer:
         self.shap_df = None
         self.test_corr = None
 
-    def top_n_feature_indices(self, rf_model, n):
-        # get feature importances
-        importances = rf_model.feature_importances_
-        # get the indices of the top n features
-        indices = sorted(
-            range(len(importances)), key=lambda i: importances[i], reverse=True
-        )[:n]
-        return indices
 
-    def train_lgbm_regressor(self, X_train, y_train, params):
-        # set label weight
-        weighting = params["weighting"]
-        if weighting == 0:
-            train_data = lgb.Dataset(X_train, label=y_train)
-        else:
-            num_bins = 1000
-            bins = np.linspace(y_train.min(), y_train.max(), num=num_bins)
-            y_train_weight = (
-                np.abs(
-                    np.digitize(y_train, bins) - np.median(np.digitize(y_train, bins))
-                )
-                ** params["weighting"]
-            )
-            # create training dataset
-            train_data = lgb.Dataset(X_train, label=y_train, weight=y_train_weight)
-
-        # train model
-        num_boost_round = params["num_trees_train"]
-        bst = lgb.train(params, train_data, num_boost_round=num_boost_round)
-
-        return bst
-
-    def _optuna_objective(self, trial):
-        params = {
-            "objective": "regression",
-            "metric": "l2",
-            "verbosity": -1,
-            "weighting": trial.suggest_int("weighting", 0, 2),
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
-            "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
-            "num_leaves": trial.suggest_int("num_leaves", 2, 128),
-            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 2, 20),
-            "max_depth": trial.suggest_int("max_depth", 1, 10),
-            "num_trees_train": trial.suggest_int("num_trees_train", 10, 150),
-        }
-        ranker_corrs = []
-        for _ in range(5):
-            val_corr = self._optuna_train(params)
-            ranker_corrs.append(val_corr)
-        return np.mean(ranker_corrs)
-
-    def _optuna_train(self, params):
-        response_train, response_val = train_test_split(
-            self.response_train, test_size=0.2, random_state=42
-        )
-        y_train = response_train[self.response_col].values
-        y_val = response_val[self.response_col].values
-        cell_line_train = response_train[self.cell_line_col].values
-        cell_line_val = response_val[self.cell_line_col].values
-
-        X_train = self.feature_df.loc[cell_line_train, self.top_feature_names].values
-        X_val = self.feature_df.loc[cell_line_val, self.top_feature_names].values
-
-        # train the model with best params and all data
-        self.lgbm_model = self.train_lgbm_regressor(X_train, y_train, params)
-
-        # predict
-        self.y_val_pred = self.lgbm_model.predict(X_val)
-
-        # compute loss
-        val_loss = np.mean((y_val - self.y_val_pred) ** 2)
-        return val_loss
-
-    def get_correlated_features(self):
-        top_features = get_top_features(
-            self.response_train,
-            self.feature_df,
-            self.response_col,
-            self.feature_fraction,
-            n_jobs=4,
-        )
-        self.correlated_features = top_features
-
-    def hyperparameter_optimization(self):
-        # hyperparameter sweep with optuna
-        study = optuna.create_study(direction="minimize")
-        study.optimize(self._optuna_objective, n_trials=self.num_hyp_trials)
-        self.best_params = study.best_trial.params
-
-    def train_first_stage(self):
-        top_features = []
-        for train_iter in range(5):
-            response_train, _ = train_test_split(
-                self.response_train, test_size=0.2, random_state=train_iter
-            )
-            y_train = response_train[self.response_col].values
-            cell_line_train = response_train[self.cell_line_col].values
-            X_train_df = self.feature_df.loc[cell_line_train, self.correlated_features]
-            X_train = X_train_df.values
-            rf = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=4)
-            rf.fit(X_train, y_train)
-            top_feature_idx = self.top_n_feature_indices(rf, 100)
-            top_feature_names = X_train_df.columns[top_feature_idx]
-            top_features.append(top_feature_names)
-        # compute the intersection
-        self.top_feature_names = list(set.union(*map(set, top_features)))
-
-    def train_second_stage(self):
-        # get the X and y train
+    def train(self):
+        X_train_df = self.feature_df.loc[self.response_train[self.cell_line_col], :]
+        X_train = X_train_df.values
         y_train = self.response_train[self.response_col].values
-        cell_line_train = self.response_train[self.cell_line_col].values
-        X_train = self.feature_df.loc[cell_line_train, self.top_feature_names].values
+        X_test_df = self.feature_df.loc[self.response_test[self.cell_line_col], :]
+        y_test = self.response_test[self.response_col].values
+        
+        #correlations = np.array([np.corrcoef(X_train[:, i], y_train)[0, 1] for i in range(X_train.shape[1])])
+        #sorted_feature_indices = np.argsort(np.abs(correlations))[::-1]
+        #num_top_features = int(0.03 * X_train.shape[1])
+        #top_feature_indices = sorted_feature_indices[:num_top_features]
+        top_features = get_correlated_features(y_train, X_train, X_train_df.columns, p=0.1)
 
-        # get the X and y test
-        self.y_test = self.response_test[self.response_col].values
-        self.cell_line_test = self.response_test[self.cell_line_col].values
-        X_test = self.feature_df.loc[self.cell_line_test, self.top_feature_names].values
+        X_train_df = X_train_df.loc[:, top_features]
+        X_train = X_train_df.values
+        X_test_df = X_test_df.loc[:, top_features]
+        X_test = X_test_df.values
 
-        # train the model with best params and all data
-        self.lgbm_model = self.train_lgbm_regressor(X_train, y_train, self.best_params)
-
+        sample_weights = np.abs(y_train)
+        model = RandomForestRegressor(random_state=42, n_jobs=4, n_estimators=500)
+        model.fit(X_train, y_train, sample_weight=sample_weights)
+        self.top_feature_names = X_train_df.columns
+        self.model = model
+        
         # predict
-        self.y_test_pred = self.lgbm_model.predict(X_test)
+        y_test_pred = model.predict(X_test)
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_test)
+        shap_values_df = pd.DataFrame(shap_values, columns=X_test_df.columns)
 
-        # compute_correlation
-        self.test_corr = pearsonr(self.y_test, self.y_test_pred)[0]
+        # print fold correlation
+        print(f"Fold correlation: {pearsonr(y_test, y_test_pred)[0]}")
 
-        # compute shap values
-        self.shap_df = self.compute_shap_values(X_test)
-        self.X_test_df = pd.DataFrame(X_test, columns=self.top_feature_names)
-
-    def compute_shap_values(self, X):
-        explainer = shap.TreeExplainer(self.lgbm_model)
-        shap_values = explainer.shap_values(X)
-        shap_df = pd.DataFrame(shap_values, columns=self.top_feature_names)
-        return shap_df
+        # save to self
+        self.X_test_df = X_test_df
+        self.y_test = y_test
+        self.cell_line_test = self.response_test[self.cell_line_col]
+        self.y_test_pred = y_test_pred
+        self.shap_df = shap_values_df
+        self.test_corr = pearsonr(y_test, y_test_pred)[0]

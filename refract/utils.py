@@ -110,6 +110,16 @@ def save_output(trainers, output_dir):
     top_feature_names = get_top_k_features(shap_values, feature_names, k=20)
     top_feature_genes = [i.split("_")[1] for i in top_feature_names]
 
+    # save the shap values and the top feature names
+    logger.info("Saving the SHAP values and top feature names...")
+    # save shap values as a dataframe
+    shap_values_df = pd.DataFrame(shap_values, columns=feature_names)
+    shap_values_df.to_csv(os.path.join(output_dir, "shap_values.csv"), index=False)
+    # save top feature names as a text file with one feature per line
+    with open(os.path.join(output_dir, "top_feature_names.txt"), "w") as f:
+        for item in top_feature_names:
+            f.write("%s\n" % item)
+
     # get connectivity of top features
     logger.info("Getting network interactions...")
     network_interactions, _ = get_stringdb_network_interactions(top_feature_genes)

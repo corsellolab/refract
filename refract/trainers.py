@@ -12,6 +12,8 @@ import xgboost as xgb
 from scipy.stats import pearsonr
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import QuantileTransformer
+from flaml import AutoML
 from tqdm import tqdm
 
 from refract.utils import get_top_features
@@ -50,7 +52,7 @@ def get_correlated_features(y, X, colnames, p):
     return selected_colnames
 
 
-class RFTrainer:
+class AutoMLTrainer:
     """Trains a LGBM Regression Model"""
 
     def __init__(
@@ -87,11 +89,7 @@ class RFTrainer:
         X_test_df = self.feature_df.loc[self.response_test[self.cell_line_col], :]
         y_test = self.response_test[self.response_col].values
         
-        #correlations = np.array([np.corrcoef(X_train[:, i], y_train)[0, 1] for i in range(X_train.shape[1])])
-        #sorted_feature_indices = np.argsort(np.abs(correlations))[::-1]
-        #num_top_features = int(0.03 * X_train.shape[1])
-        #top_feature_indices = sorted_feature_indices[:num_top_features]
-        top_features = get_correlated_features(y_train, X_train, X_train_df.columns, p=0.1)
+        top_features = get_correlated_features(y_train, X_train, X_train_df.columns, p=self.feature_fraction)
 
         X_train_df = X_train_df.loc[:, top_features]
         X_train = X_train_df.values
@@ -99,14 +97,22 @@ class RFTrainer:
         X_test = X_test_df.values
 
         sample_weights = np.abs(y_train)
-        model = RandomForestRegressor(random_state=42, n_jobs=4, n_estimators=500)
-        model.fit(X_train, y_train, sample_weight=sample_weights)
+        automl = AutoML()
+        automl.fit(
+            X_train, 
+            y_train, 
+            task="regression", 
+            time_budget=120, 
+            metric="rmse", 
+            estimator_list=['xgboost', 'rf', 'lgbm'],
+            sample_weight=sample_weights
+        )
         self.top_feature_names = X_train_df.columns
-        self.model = model
+        self.model = automl.model.estimator
         
         # predict
-        y_test_pred = model.predict(X_test)
-        explainer = shap.TreeExplainer(model)
+        y_test_pred = automl.predict(X_test)
+        explainer = shap.TreeExplainer(automl.model.estimator)
         shap_values = explainer.shap_values(X_test)
         shap_values_df = pd.DataFrame(shap_values, columns=X_test_df.columns)
 

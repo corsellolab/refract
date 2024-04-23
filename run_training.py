@@ -12,7 +12,7 @@ import xgboost as xgb
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from refract.datasets import PrismDataset
-from refract.trainers import RFTrainer
+from refract.trainers import AutoMLTrainer
 from refract.utils import get_top_features, save_output
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def run(
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
 
         # train one fold
-        trainer = RFTrainer(
+        trainer = AutoMLTrainer(
             response_train=response_train,
             response_test=response_test,
             feature_df=feature_df,

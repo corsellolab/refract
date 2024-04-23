@@ -1,6 +1,6 @@
-params.response_dir = '/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/primary_23q2'
-params.feature_path = '/scratch/users/nphill22/projects/corsello_lab/20230911_follow_up/data/features/v2_x-all.pkl'
-params.output_path = '/scratch/users/nphill22/projects/corsello_lab/20231006_permutation_analysis/data/baseline_output'
+params.response_dir = '/scratch/users/nphill22/projects/corsello_lab/20240313_prism_final_reruns/data/features/responses'
+params.feature_path = '/scratch/users/nphill22/projects/corsello_lab/20240313_prism_final_reruns/data/features/v3_updated_x-all.pkl'
+params.output_path = '/scratch/users/nphill22/projects/corsello_lab/20240313_prism_final_reruns/data/rf_output'
 params.dev = false
 
 process train_rank {
@@ -9,7 +9,7 @@ process train_rank {
     memory { 16.GB * task.attempt }
     time { 2.hour * task.attempt }
     executor 'slurm'
-    conda '/home/groups/dkurtz/tools/conda/miniconda3/envs/corlab'
+    conda '/scratch/users/nphill22/temp/miniconda3'
     publishDir "${params.output_path}", mode: 'copy'
 
     input:
@@ -20,7 +20,7 @@ process train_rank {
 
     script:
     """
-    python /scratch/users/nphill22/projects/corsello_lab/20231006_permutation_analysis/refract/run_training.py --response_path ${response_path} --feature_path ${params.feature_path} --output_dir ${drug_name}
+    python /scratch/users/nphill22/projects/corsello_lab/20240313_prism_final_reruns/refract/run_training.py --response_path ${response_path} --feature_path ${params.feature_path} --output_dir ${drug_name}
     """
 }
 

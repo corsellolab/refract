@@ -21,6 +21,17 @@ from refract.utils import get_top_features
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
+def get_n_correlated_features(y, X, colnames, n):
+    # Step 1: Compute the correlation for each column
+    correlations = np.array([np.corrcoef(y, X[:, i])[0, 1] for i in range(X.shape[1])])
+
+    # Step 2: Get the top n correlated features
+    top_n_indices = np.argsort(np.abs(correlations))[-n:]
+    top_n_colnames = [colnames[i] for i in top_n_indices]
+
+    # Step 3: Return the list of column names
+    return top_n_colnames
+
 def get_correlated_features(y, X, colnames, p):
     # Step 1: Compute the correlation for each column
     correlations = np.array([np.corrcoef(y, X[:, i])[0, 1] for i in range(X.shape[1])])
@@ -50,6 +61,92 @@ def get_correlated_features(y, X, colnames, p):
     
     # Step 4: Return the list of column names
     return selected_colnames
+
+class BaselineTrainer:
+    def __init__(
+        self,
+        response_train,
+        response_test,
+        feature_df,
+        response_col="LFC.cb",
+        cell_line_col="ccle_name",
+        feature_fraction=0.03,
+    ):
+        self.response_train = response_train
+        self.response_test = response_test
+        self.feature_df = feature_df
+        self.response_col = response_col
+        self.cell_line_col = cell_line_col
+        self.feature_fraction = feature_fraction
+
+        self.top_feature_names = None
+        self.model = None
+
+        self.X_test_df = None
+        self.y_test = None
+        self.cell_line_test = None
+        self.y_test_pred = None
+        self.shap_df = None
+        self.test_corr = None
+
+
+    def train(self):
+        # select appropriate cell lines
+        X_train_df = self.feature_df.loc[self.response_train[self.cell_line_col], :]
+        X_test_df = self.feature_df.loc[self.response_test[self.cell_line_col], :]
+        
+        # drop all columns with zero stddev
+        X_train_df = X_train_df.loc[:, X_train_df.std() != 0]
+
+        # get X_train, X_test y_train, y_test
+        X_train = X_train_df.values
+        X_test = X_test_df.values
+        y_train = self.response_train[self.response_col].values
+        y_test = self.response_test[self.response_col].values
+
+        # filter to top features
+        top_features = get_n_correlated_features(y_train, X_train, X_train_df.columns, n=500)
+
+        # filter features
+        X_train_df = X_train_df.loc[:, top_features]
+        X_test_df = X_test_df.loc[:, top_features]
+        X_train = X_train_df.values
+        X_test = X_test_df.values
+
+        # train a random forest model
+        model = RandomForestRegressor(
+            n_estimators=500,        # num.trees in ranger
+            criterion='squared_error',  # variance in ranger for regression
+            max_features=.33,     # mtry, 'auto' sets to n_features / 3 for regression
+            min_samples_split=2,     # min.node.size, more a function of min impurity decrease
+            min_samples_leaf=5,      # min.node.size in ranger for regression
+            bootstrap=True,          # replace in ranger
+            oob_score=True,          # oob.error in ranger
+            n_jobs=-1,               # Use all cores, similar to default parallelism in ranger
+            random_state=None,       # Control randomness for reproducibility
+            verbose=0                # verbose in ranger
+        )
+
+        model.fit(X_train, y_train)
+        self.top_feature_names = X_train_df.columns
+        self.model = model
+        
+        # predict
+        y_test_pred = model.predict(X_test)
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_test)
+        shap_values_df = pd.DataFrame(shap_values, columns=X_test_df.columns)
+
+        # print fold correlation
+        print(f"Fold correlation: {pearsonr(y_test, y_test_pred)[0]}")
+
+        # save to self
+        self.X_test_df = X_test_df
+        self.y_test = y_test
+        self.cell_line_test = self.response_test[self.cell_line_col]
+        self.y_test_pred = y_test_pred
+        self.shap_df = shap_values_df
+        self.test_corr = pearsonr(y_test, y_test_pred)[0]
 
 
 class AutoMLTrainer:
@@ -89,23 +186,25 @@ class AutoMLTrainer:
         X_test_df = self.feature_df.loc[self.response_test[self.cell_line_col], :]
         y_test = self.response_test[self.response_col].values
         
-        top_features = get_correlated_features(y_train, X_train, X_train_df.columns, p=self.feature_fraction)
+        # drop all columns with zero stddev
+        X_train_df = X_train_df.loc[:, X_train_df.std() != 0]
+        # filter to top features
+        top_features = get_n_correlated_features(y_train, X_train, X_train_df.columns, n=500)
 
         X_train_df = X_train_df.loc[:, top_features]
         X_train = X_train_df.values
         X_test_df = X_test_df.loc[:, top_features]
         X_test = X_test_df.values
 
-        sample_weights = np.abs(y_train)
+        #sample_weights = np.abs(y_train)
         automl = AutoML()
         automl.fit(
             X_train, 
             y_train, 
             task="regression", 
-            time_budget=120, 
+            time_budget=40, 
             metric="rmse", 
             estimator_list=['xgboost', 'rf', 'lgbm'],
-            sample_weight=sample_weights
         )
         self.top_feature_names = X_train_df.columns
         self.model = automl.model.estimator

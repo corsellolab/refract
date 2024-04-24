@@ -12,7 +12,7 @@ import xgboost as xgb
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from refract.datasets import PrismDataset
-from refract.trainers import AutoMLTrainer
+from refract.trainers import AutoMLTrainer, BaselineTrainer
 from refract.utils import get_top_features, save_output
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ def run(
     logger.info("Loading feature data...")
     with open(feature_path, "rb") as f:
         feature_df = pickle.load(f)
-    feature_df = feature_df.rename_axis("ccle_name")
-    feature_df = feature_df.fillna(-1)
+    feature_df.set_index("ccle_name", inplace=True)
+    feature_df.fillna(-1, inplace=True)
 
     logger.info("Loading response data...")
     response_df = pd.read_csv(response_path)
@@ -58,15 +58,15 @@ def run(
     response_df['quantile_bins'] = pd.qcut(response_df['LFC.cb'], q=10, labels=False)
 
     # START CV TRAIN
-    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    skf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
-    for i, (train_index, test_index) in enumerate(skf.split(response_df, response_df["quantile_bins"])):
+    for i, (train_index, test_index) in enumerate(skf.split(response_df)):
         logger.info(f"Training fold {i}")
         response_train = response_df.iloc[train_index, :].reset_index(drop=True).copy()
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
 
         # train one fold
-        trainer = AutoMLTrainer(
+        trainer = BaselineTrainer(
             response_train=response_train,
             response_test=response_test,
             feature_df=feature_df,

@@ -128,9 +128,9 @@ def save_output(trainers, output_dir):
     )
 
     # save trainers
-    logger.info("Saving trainers to trainers.pkl...")
-    with open(os.path.join(output_dir, "trainers.pkl"), "wb") as f:
-        pickle.dump(trainers, f)
+    #logger.info("Saving trainers to trainers.pkl...")
+    #with open(os.path.join(output_dir, "trainers.pkl"), "wb") as f:
+    #    pickle.dump(trainers, f)
 
 
 def moving_window_average(lst, window_size=3):

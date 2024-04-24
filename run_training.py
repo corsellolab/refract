@@ -13,7 +13,7 @@ from sklearn.model_selection import KFold, StratifiedKFold
 
 from refract.datasets import PrismDataset
 from refract.trainers import AutoMLTrainer, BaselineTrainer
-from refract.utils import get_top_features, save_output
+from refract.utils import save_output
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
@@ -24,7 +24,6 @@ def run(
     response_path,
     feature_path,
     output_dir,
-    feature_fraction,
     cv_folds=CV_FOLDS,
 ):
     # create output dir
@@ -54,9 +53,6 @@ def run(
     # drop duplicates by ccle_name, keep first
     response_df = response_df.drop_duplicates(subset=["ccle_name"], keep="first")
 
-    # add quantile bins
-    response_df['quantile_bins'] = pd.qcut(response_df['LFC.cb'], q=10, labels=False)
-
     # START CV TRAIN
     skf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
@@ -66,11 +62,10 @@ def run(
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
 
         # train one fold
-        trainer = BaselineTrainer(
+        trainer = AutoMLTrainer(
             response_train=response_train,
             response_test=response_test,
             feature_df=feature_df,
-            feature_fraction=feature_fraction,
         )
         trainer.train()
         trainers.append(trainer)
@@ -87,6 +82,5 @@ if __name__ == "__main__":
     argparser.add_argument("--response_path", type=str, required=True)
     argparser.add_argument("--feature_path", type=str, required=True)
     argparser.add_argument("--output_dir", type=str, required=True)
-    argparser.add_argument("--feature_fraction", type=float, default=0.01)
     args = argparser.parse_args()
-    run(args.response_path, args.feature_path, args.output_dir, args.feature_fraction)
+    run(args.response_path, args.feature_path, args.output_dir)

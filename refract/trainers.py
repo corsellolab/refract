@@ -16,8 +16,6 @@ from sklearn.preprocessing import QuantileTransformer
 from flaml import AutoML
 from tqdm import tqdm
 
-from refract.utils import get_top_features
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
@@ -70,14 +68,14 @@ class BaselineTrainer:
         feature_df,
         response_col="LFC.cb",
         cell_line_col="ccle_name",
-        feature_fraction=0.03,
+        num_features=500,
     ):
         self.response_train = response_train
         self.response_test = response_test
         self.feature_df = feature_df
         self.response_col = response_col
         self.cell_line_col = cell_line_col
-        self.feature_fraction = feature_fraction
+        self.num_features = num_features
 
         self.top_feature_names = None
         self.model = None
@@ -159,14 +157,14 @@ class AutoMLTrainer:
         feature_df,
         response_col="LFC.cb",
         cell_line_col="ccle_name",
-        feature_fraction=0.03,
+        num_features=500,
     ):
         self.response_train = response_train
         self.response_test = response_test
         self.feature_df = feature_df
         self.response_col = response_col
         self.cell_line_col = cell_line_col
-        self.feature_fraction = feature_fraction
+        self.num_features = num_features
 
         self.top_feature_names = None
         self.model = None
@@ -181,33 +179,38 @@ class AutoMLTrainer:
 
     def train(self):
         X_train_df = self.feature_df.loc[self.response_train[self.cell_line_col], :]
-        X_train = X_train_df.values
-        y_train = self.response_train[self.response_col].values
         X_test_df = self.feature_df.loc[self.response_test[self.cell_line_col], :]
-        y_test = self.response_test[self.response_col].values
         
         # drop all columns with zero stddev
         X_train_df = X_train_df.loc[:, X_train_df.std() != 0]
+
+        # get X_train, X_test y_train, y_test
+        X_train = X_train_df.values
+        X_test = X_test_df.values
+        y_train = self.response_train[self.response_col].values
+        y_test = self.response_test[self.response_col].values
+
         # filter to top features
         top_features = get_n_correlated_features(y_train, X_train, X_train_df.columns, n=500)
 
+        # filter features
         X_train_df = X_train_df.loc[:, top_features]
-        X_train = X_train_df.values
         X_test_df = X_test_df.loc[:, top_features]
+        X_train = X_train_df.values
         X_test = X_test_df.values
 
-        #sample_weights = np.abs(y_train)
         automl = AutoML()
         automl.fit(
             X_train, 
             y_train, 
             task="regression", 
-            time_budget=40, 
+            time_budget=120, 
             metric="rmse", 
             estimator_list=['xgboost', 'rf', 'lgbm'],
         )
         self.top_feature_names = X_train_df.columns
         self.model = automl.model.estimator
+        self.automl = automl
         
         # predict
         y_test_pred = automl.predict(X_test)

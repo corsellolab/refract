@@ -34,45 +34,6 @@ class AttrDict(dict):
             raise AttributeError(f"'{name}' is not a valid attribute")
 
 
-def calculate_correlation(df_features, col, series_response):
-    c = pearsonr(df_features[col], series_response)[0]
-    # get absolute value of c
-    c = abs(c)
-    feature_type = col.split("_")[0]
-    return {"corr": c, "feature_type": feature_type, "feature": col}
-
-
-def get_top_features(response_df, feature_df, response_col, p, n_jobs=1):
-    df = response_df.merge(feature_df, on="ccle_name")
-    df_features = df.loc[:, feature_df.columns]
-    series_response = df.loc[:, response_col]
-
-    print("Correlating features with response...")
-
-    # Parallelizing the correlation calculation
-    corrs = Parallel(n_jobs=n_jobs)(
-        delayed(calculate_correlation)(df_features, col, series_response)
-        for col in tqdm(df_features.columns)
-    )
-
-    corr_df = pd.DataFrame(corrs)
-
-    # get all LIN features
-    lin_df = corr_df.loc[corr_df.feature_type == "LIN", :]
-
-    top_correlated = (
-        corr_df.groupby("feature_type")
-        .apply(lambda group: group.nlargest(int(len(group) * p), "corr"))
-        .reset_index(level=0, drop=True)
-    )
-
-    top_features = top_correlated.feature.tolist()
-    top_features.extend(lin_df.feature.tolist())
-    top_features = list(set(top_features))
-
-    return top_features
-
-
 def save_output(trainers, output_dir):
     # compute SHAP values and predictions across the full dataset
     logger.info("Aggregating SHAP values and predictions...")
@@ -127,10 +88,17 @@ def save_output(trainers, output_dir):
         os.path.join(output_dir, "network_interactions.csv"), index=False
     )
 
+    # save training details
+    logger.info("Saving training details...")
+    training_details = get_training_details(trainers)
+    training_details.to_csv(os.path.join(output_dir, "training_details.csv"), index=False)
+
     # save trainers
     #logger.info("Saving trainers to trainers.pkl...")
     #with open(os.path.join(output_dir, "trainers.pkl"), "wb") as f:
     #    pickle.dump(trainers, f)
+
+
 
 
 def moving_window_average(lst, window_size=3):
@@ -146,3 +114,24 @@ def moving_window_average(lst, window_size=3):
         averages.append(avg)
 
     return averages
+
+def get_training_details(trainers):
+    # For each trainer, save training details
+    all_fold_trainers = []
+    for trainer in trainers:
+        # get model_name 
+        model_name = trainer.automl.best_estimator
+        # get config
+        config = trainer.automl.best_config
+        # train time
+        train_time = trainer.automl.best_config_train_time
+
+        # construct a dictionary
+        training_details = {
+            "model_name": model_name,
+            "train_time": train_time,
+            **config,
+        }
+        all_fold_trainers.append(training_details)
+    df = pd.DataFrame(all_fold_trainers)
+    return df

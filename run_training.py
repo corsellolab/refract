@@ -9,27 +9,22 @@ import numpy as np
 import pandas as pd
 import shap
 import xgboost as xgb
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 
 from refract.datasets import PrismDataset
-from refract.trainers import XGBoostRankingTrainer
+from refract.trainers import AutoMLTrainer, BaselineTrainer
 from refract.utils import get_top_features, save_output
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
-SLATE_LENGTH = 10
-NUM_EPOCHS = 100
-CV_FOLDS = 5
-
+CV_FOLDS = 10
 
 def run(
     response_path,
     feature_path,
     output_dir,
     feature_fraction,
-    slate_length=SLATE_LENGTH,
-    num_epochs=NUM_EPOCHS,
     cv_folds=CV_FOLDS,
 ):
     # create output dir
@@ -44,61 +39,38 @@ def run(
     logger.info("Loading feature data...")
     with open(feature_path, "rb") as f:
         feature_df = pickle.load(f)
-    feature_df = feature_df.rename_axis("ccle_name")
-    feature_df = feature_df.fillna(-1)
+    feature_df.set_index("ccle_name", inplace=True)
+    feature_df.fillna(-1, inplace=True)
 
     logger.info("Loading response data...")
     response_df = pd.read_csv(response_path)
 
+    # only keep cell lines we have features for
+    available_ccle_names = set(feature_df.index)
+    response_df = response_df[response_df["ccle_name"].isin(available_ccle_names)]
+
+    # drop culture column
+    response_df = response_df.drop(columns=["culture"])
+    # drop duplicates by ccle_name, keep first
+    response_df = response_df.drop_duplicates(subset=["ccle_name"], keep="first")
+
+    # add quantile bins
+    response_df['quantile_bins'] = pd.qcut(response_df['LFC.cb'], q=10, labels=False)
+
     # START CV TRAIN
-    splitter = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    skf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
     trainers = []
-    for i, (train_val_index, test_index) in enumerate(splitter.split(response_df)):
+    for i, (train_index, test_index) in enumerate(skf.split(response_df)):
         logger.info(f"Training fold {i}")
-        response_train_val = (
-            response_df.iloc[train_val_index, :].reset_index(drop=True).copy()
-        )
-        train_val_splitter = KFold(n_splits=cv_folds - 1, shuffle=True, random_state=42)
-        train_index, val_index = next(train_val_splitter.split(response_train_val))
-        response_train = (
-            response_train_val.iloc[train_index, :].reset_index(drop=True).copy()
-        )
-        response_val = (
-            response_train_val.iloc[val_index, :].reset_index(drop=True).copy()
-        )
+        response_train = response_df.iloc[train_index, :].reset_index(drop=True).copy()
         response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
 
-        # feature selection
-        top_features = get_top_features(
-            response_train, feature_df, "LFC.cb", feature_fraction
-        )
-
-        # load datasets
-        ds_train = PrismDataset(
-            response_train,
-            feature_df,
-            slate_length=slate_length,
-            feature_cols=top_features,
-        )
-        ds_val = PrismDataset(
-            response_val,
-            feature_df,
-            slate_length=slate_length,
-            feature_cols=top_features,
-        )
-        ds_test = PrismDataset(
-            response_test,
-            feature_df,
-            slate_length=slate_length,
-            feature_cols=top_features,
-        )
-
         # train one fold
-        trainer = XGBoostRankingTrainer(
-            train_ds=ds_train,
-            val_ds=ds_val,
-            test_ds=ds_test,
-            num_epochs=num_epochs,
+        trainer = BaselineTrainer(
+            response_train=response_train,
+            response_test=response_test,
+            feature_df=feature_df,
+            feature_fraction=feature_fraction,
         )
         trainer.train()
         trainers.append(trainer)

@@ -40,13 +40,8 @@ def get_stringdb_network_interactions(gene_list):
 def get_merged_shap_values_and_features(trainer_list):
     """Aggregate SHAP values and features from multiple trainers."""
     # get the shap values and features from each trainer
-    shap_dfs = [
-        pd.DataFrame(i.shap_values, columns=i.test_feature_names) for i in trainer_list
-    ]
-    feature_dfs = [
-        pd.DataFrame(i.test_features, columns=i.test_feature_names)
-        for i in trainer_list
-    ]
+    shap_dfs = [i.shap_df for i in trainer_list]
+    feature_dfs = [i.X_test_df for i in trainer_list]
 
     # concatenate
     shap_df = pd.concat(shap_dfs, axis=0)
@@ -78,10 +73,9 @@ def get_test_predictions(trainer_list):
     test_labels = []
     test_ccle_names = []
     for trainer in trainer_list:
-        test_df = trainer.test_results_df
-        test_preds.append(test_df["preds"].values)
-        test_labels.append(test_df["LFC.cb"].values)
-        test_ccle_names.append(test_df["ccle_name"].values)
+        test_preds.append(trainer.y_test_pred)
+        test_labels.append(trainer.y_test)
+        test_ccle_names.append(trainer.cell_line_test)
     test_preds = np.concatenate(test_preds, axis=0)
     test_labels = np.concatenate(test_labels, axis=0)
     test_ccle_names = np.concatenate(test_ccle_names, axis=0)

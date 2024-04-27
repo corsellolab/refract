@@ -1,86 +1,107 @@
-import argparse
 import logging
 import os
-import pickle
+import torch
 import sys
-
+import pickle
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import shap
-import xgboost as xgb
-from sklearn.model_selection import KFold, StratifiedKFold
+import numpy as np
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+import argparse
 
 from refract.datasets import PrismDataset
-from refract.trainers import AutoMLTrainer, BaselineTrainer
-from refract.utils import save_output
+from refract.models import get_model
+from refract.trainers import train_model
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level="INFO")
-
-CV_FOLDS = 10
+logging.basicConfig(level='INFO')
 
 def run(
-    response_path,
-    feature_path,
-    output_dir,
-    cv_folds=CV_FOLDS,
+        response_path,
+        feature_path,
+        folds_path,
+        output_dir,
+        checkpoint_dir
 ):
     # create output dir
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    # update logger to write to file
-    fh = logging.FileHandler(os.path.join(output_dir, "train.log"))
-    fh.setLevel(logging.INFO)
-    logger.addHandler(fh)
 
     # load data
     logger.info("Loading feature data...")
     with open(feature_path, "rb") as f:
         feature_df = pickle.load(f)
-    feature_df.set_index("ccle_name", inplace=True)
-    feature_df.fillna(-1, inplace=True)
 
     logger.info("Loading response data...")
     response_df = pd.read_csv(response_path)
 
-    # only keep cell lines we have features for
-    available_ccle_names = set(feature_df.index)
-    response_df = response_df[response_df["ccle_name"].isin(available_ccle_names)]
+    logger.info("Loading ccle_name folds...")
+    ccle_cv = pd.read_csv(folds_path)
 
-    # drop culture column
-    response_df = response_df.drop(columns=["culture"])
-    # drop duplicates by ccle_name, keep first
-    response_df = response_df.drop_duplicates(subset=["ccle_name"], keep="first")
+    # split into train, val, test based on fold id
+    train_folds = [0,1,2,3,4,5]
+    val_folds = [6,7]
+    test_folds = [8,9]
 
-    # START CV TRAIN
-    skf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
-    trainers = []
-    for i, (train_index, test_index) in enumerate(skf.split(response_df)):
-        logger.info(f"Training fold {i}")
-        response_train = response_df.iloc[train_index, :].reset_index(drop=True).copy()
-        response_test = response_df.iloc[test_index, :].reset_index(drop=True).copy()
+    train_ccle_names = ccle_cv[ccle_cv['fold'].isin(train_folds)]['ccle_name']
+    val_ccle_names = ccle_cv[ccle_cv['fold'].isin(val_folds)]['ccle_name']
+    test_ccle_names = ccle_cv[ccle_cv['fold'].isin(test_folds)]['ccle_name']
 
-        # train one fold
-        trainer = AutoMLTrainer(
-            response_train=response_train,
-            response_test=response_test,
-            feature_df=feature_df,
-        )
-        trainer.train()
-        trainers.append(trainer)
-        ### END CV TRAIN
+    # subset the response data
+    logger.info("Subsetting response data...")
+    response_df_train = response_df[response_df['ccle_name'].isin(train_ccle_names)]
+    response_df_val = response_df[response_df['ccle_name'].isin(val_ccle_names)]
+    response_df_test = response_df[response_df['ccle_name'].isin(test_ccle_names)]
 
-    # save output
-    logger.info("Saving output...")
-    save_output(trainers, output_dir)
-    logger.info("done")
+    # subset the feature data
+    logger.info("Subsetting feature data...")
+    feature_df_train = feature_df.loc[train_ccle_names]
+    feature_df_val = feature_df.loc[val_ccle_names]
+    feature_df_test = feature_df.loc[test_ccle_names]
+
+    # standard scale the input
+    logger.info("Scaling features...")
+    scaler = StandardScaler()
+    feature_df_train = pd.DataFrame(scaler.fit_transform(feature_df_train), index=feature_df_train.index, columns=feature_df_train.columns)
+    feature_df_val = pd.DataFrame(scaler.transform(feature_df_val), index=feature_df_val.index, columns=feature_df_val.columns)
+    feature_df_test = pd.DataFrame(scaler.transform(feature_df_test), index=feature_df_test.index, columns=feature_df_test.columns)
+
+    # get the drug encoder
+    logger.info("Fitting drug encoder...")
+    unique_drugs = response_df['pert_name'].unique()
+    drug_encoder = LabelEncoder()
+    drug_encoder.fit(unique_drugs)
+    # save drug encoder to output path
+    with open(os.path.join(output_dir, 'drug_encoder.pkl'), 'wb') as f:
+        pickle.dump(drug_encoder, f)
+
+    # create datasets
+    logger.info("Creating datasets...")
+    train_dataset = PrismDataset(feature_df_train, response_df_train, drug_encoder)
+    val_dataset = PrismDataset(feature_df_val, response_df_val, drug_encoder)
+    test_dataset = PrismDataset(feature_df_test, response_df_test, drug_encoder)
+
+    # create dataloaders
+    logger.info("Creating dataloaders...")
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=8)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1024, shuffle=False, num_workers=8)
+    test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=8)
+
+    # get the model 
+    logger.info("Getting Model...")
+    model = get_model(input_dim=train_dataset.num_features, num_embeddings=train_dataset.num_embeddings, embedding_dim=10)
+
+    # train
+    logger.info("Training...")
+    train_model(model, train_dataloader, val_dataloader, num_epochs=200, patience=10, chkpt_dir=checkpoint_dir)
 
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--response_path", type=str, required=True)
     argparser.add_argument("--feature_path", type=str, required=True)
+    argparser.add_argument("--folds_path", type=str, required=True)
     argparser.add_argument("--output_dir", type=str, required=True)
+    argparser.add_argument("--checkpoint_dir", type=str, required=False, default="checkpoints")
     args = argparser.parse_args()
-    run(args.response_path, args.feature_path, args.output_dir)
+    run(args.response_path, args.feature_path, args.folds_path, args.output_dir, args.checkpoint_dir)

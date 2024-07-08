@@ -1,107 +1,134 @@
+import argparse
 import logging
 import os
-import torch
-import sys
 import pickle
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-import argparse
+import sys
+import json
+import glob
 
-from refract.datasets import PrismDataset
-from refract.models import get_model
-from refract.trainers import train_model
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import shap
+import xgboost as xgb
+from sklearn.model_selection import KFold, StratifiedKFold, GroupKFold
+
+from refract.trainers import AutoMLTrainer
+from refract.utils import save_output, get_fold_assignment
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level='INFO')
+logging.basicConfig(level="INFO")
+
+CV_FOLDS = 10
 
 def run(
-        response_path,
-        feature_path,
-        folds_path,
-        output_dir,
-        checkpoint_dir
+    drug_name,
+    response_dir,
+    feature_path,
+    output_dir,
+    neighborhood_json,
+    cv_folds=CV_FOLDS,
 ):
     # create output dir
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    # update logger to write to file
+    fh = logging.FileHandler(os.path.join(output_dir, "train.log"))
+    fh.setLevel(logging.INFO)
+    logger.addHandler(fh)
+
     # load data
     logger.info("Loading feature data...")
     with open(feature_path, "rb") as f:
         feature_df = pickle.load(f)
+    feature_df.set_index("ccle_name", inplace=True)
+    feature_df.fillna(-1, inplace=True)
+    # drop low variance features
+    feature_df = feature_df.loc[:, feature_df.var() > 0]
+
+    # read the neighborhood json
+    logger.info("Loading neighborhood data...")
+    with open(neighborhood_json, "r") as f:
+        neighborhood_dict = json.load(f)
+        # get similar drugs from the neighborhood
+    similar_drugs = neighborhood_dict[drug_name]
 
     logger.info("Loading response data...")
-    response_df = pd.read_csv(response_path)
+    response_files = glob.glob(os.path.join(response_dir, "*.csv"))
+    response_data = {}
+    for response_file in response_files:
+        response_name = os.path.basename(response_file).replace(".csv", "")
+        response_data[response_name] = pd.read_csv(response_file)
+    # for every one, select LFC.CB, pert_name, ccle_name
+    response_data = {k: v.loc[:, ["LFC.cb", "pert_name", "ccle_name"]] for k, v in response_data.items()}
+    # concatenate all responses
+    response_data = pd.concat(response_data.values(), axis=0)
+    # drop duplicates on pert_name, ccle_name
+    response_data = response_data.drop_duplicates(subset=["pert_name", "ccle_name"])
+    # pivot so ccle_name is the columns and pert_name is the index
+    response_data = response_data.pivot(index="pert_name", columns="ccle_name", values="LFC.cb")    # get responses for all these
+    cluster_responses = response_data.loc[response_data.index.isin(similar_drugs), :]
+    # set columns as str
+    cluster_responses.columns = cluster_responses.columns.astype(str)
+    # drop column named nan
+    cluster_responses = cluster_responses.drop("nan", axis=1)
+    # transpose cluster_responses
+    cluster_responses = cluster_responses.T
+    # fill NaN with 0
+    cluster_responses = cluster_responses.fillna(0)
+    # melt cluster responses
+    cluster_responses = cluster_responses.reset_index().melt(id_vars="ccle_name", var_name="pert_name", value_name="LFC.cb")
+    # set ccle_name as index
+    cluster_responses = cluster_responses.set_index("ccle_name")
 
-    logger.info("Loading ccle_name folds...")
-    ccle_cv = pd.read_csv(folds_path)
+    logger.info("Preparing for training...")
+    fold_assignment = get_fold_assignment(cluster_responses, drug_name)
+    cluster_responses = cluster_responses.loc[cluster_responses.index.isin(fold_assignment.keys()), :]
+    # merge all
+    df_all = cluster_responses.merge(feature_df, left_index=True, right_index=True, how='inner')
+    feature_cols = feature_df.columns
+    label_cols = cluster_responses.columns
+    df_all["fold"] = df_all.index.map(fold_assignment)
 
-    # split into train, val, test based on fold id
-    train_folds = [0,1,2,3,4,5]
-    val_folds = [6,7]
-    test_folds = [8,9]
-
-    train_ccle_names = ccle_cv[ccle_cv['fold'].isin(train_folds)]['ccle_name']
-    val_ccle_names = ccle_cv[ccle_cv['fold'].isin(val_folds)]['ccle_name']
-    test_ccle_names = ccle_cv[ccle_cv['fold'].isin(test_folds)]['ccle_name']
-
-    # subset the response data
-    logger.info("Subsetting response data...")
-    response_df_train = response_df[response_df['ccle_name'].isin(train_ccle_names)]
-    response_df_val = response_df[response_df['ccle_name'].isin(val_ccle_names)]
-    response_df_test = response_df[response_df['ccle_name'].isin(test_ccle_names)]
-
-    # subset the feature data
-    logger.info("Subsetting feature data...")
-    feature_df_train = feature_df.loc[train_ccle_names]
-    feature_df_val = feature_df.loc[val_ccle_names]
-    feature_df_test = feature_df.loc[test_ccle_names]
-
-    # standard scale the input
-    logger.info("Scaling features...")
-    scaler = StandardScaler()
-    feature_df_train = pd.DataFrame(scaler.fit_transform(feature_df_train), index=feature_df_train.index, columns=feature_df_train.columns)
-    feature_df_val = pd.DataFrame(scaler.transform(feature_df_val), index=feature_df_val.index, columns=feature_df_val.columns)
-    feature_df_test = pd.DataFrame(scaler.transform(feature_df_test), index=feature_df_test.index, columns=feature_df_test.columns)
-
-    # get the drug encoder
-    logger.info("Fitting drug encoder...")
-    unique_drugs = response_df['pert_name'].unique()
-    drug_encoder = LabelEncoder()
-    drug_encoder.fit(unique_drugs)
-    # save drug encoder to output path
-    with open(os.path.join(output_dir, 'drug_encoder.pkl'), 'wb') as f:
-        pickle.dump(drug_encoder, f)
-
-    # create datasets
-    logger.info("Creating datasets...")
-    train_dataset = PrismDataset(feature_df_train, response_df_train, drug_encoder)
-    val_dataset = PrismDataset(feature_df_val, response_df_val, drug_encoder)
-    test_dataset = PrismDataset(feature_df_test, response_df_test, drug_encoder)
-
-    # create dataloaders
-    logger.info("Creating dataloaders...")
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=8)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1024, shuffle=False, num_workers=8)
-    test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=8)
-
-    # get the model 
-    logger.info("Getting Model...")
-    model = get_model(input_dim=train_dataset.num_features, num_embeddings=train_dataset.num_embeddings, embedding_dim=10)
-
-    # train
+    # START CV TRAIN
     logger.info("Training...")
-    train_model(model, train_dataloader, val_dataloader, num_epochs=200, patience=10, chkpt_dir=checkpoint_dir)
+    X_all = df_all.loc[:, feature_cols]
+    y_all = df_all.loc[:, label_cols]
+    groups = df_all["fold"]
+    outer_cv = GroupKFold(n_splits=10)
+    trainers = []
+    for i, (train_index, test_index) in enumerate(outer_cv.split(X_all, y_all, groups)):
+        logger.info(f"Training fold {i}")
+        X_train, X_test = X_all.iloc[train_index], X_all.iloc[test_index]
+        y_train, y_test = y_all.iloc[train_index], y_all.iloc[test_index]        
+        # train one fold
+        trainer = AutoMLTrainer(
+            X_train=X_train,
+            y_train=y_train,
+            X_test=X_test,
+            y_test=y_test,
+            feature_cols=feature_cols,
+            drug_name=drug_name,
+            fold_assignment=fold_assignment
+        )
+        trainer.select_features()
+        trainer.train()
+        trainers.append(trainer)
+        ### END CV TRAIN
+
+    # save output
+    logger.info("Saving output...")
+    save_output(trainers, output_dir)
+    logger.info("done")
 
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--response_path", type=str, required=True)
+    argparser.add_argument("--drug_name", type=str, required=True)
+    argparser.add_argument("--response_dir", type=str, required=True)
     argparser.add_argument("--feature_path", type=str, required=True)
-    argparser.add_argument("--folds_path", type=str, required=True)
     argparser.add_argument("--output_dir", type=str, required=True)
-    argparser.add_argument("--checkpoint_dir", type=str, required=False, default="checkpoints")
+    argparser.add_argument("--neighborhood_json", type=str, required=True)
     args = argparser.parse_args()
-    run(args.response_path, args.feature_path, args.folds_path, args.output_dir, args.checkpoint_dir)
+    run(args.drug_name, args.response_dir, args.feature_path, args.output_dir, args.neighborhood_json)

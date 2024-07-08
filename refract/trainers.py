@@ -1,91 +1,117 @@
-import os
-import sys
-import torch
-import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
-import tqdm
+# trainer for the XGBoost ranking model
+import logging
+from functools import partial
 
-def save_checkpoint(model, optimizer, epoch, loss, filename):
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'loss': loss,
-    }
-    torch.save(checkpoint, filename)
+import lightgbm as lgb
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import shap
+import xgboost as xgb
+from scipy.stats import pearsonr
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, GroupKFold, GridSearchCV
+from sklearn.preprocessing import QuantileTransformer
+from flaml import AutoML
+from tqdm import tqdm
 
-def train_model(model, train_dataloader, val_dataloader, num_epochs, patience, chkpt_dir):
-    # Assuming the loss function and optimizer are predefined globally or are parameters
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+from refract.utils import get_correlated_features
 
-    # Device configuration
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print("Using device: ", device)
-    model.to(device)
+logger = logging.getLogger(__name__)
+logging.basicConfig(level="INFO")
 
-    best_val_loss = float('inf')
-    patience_counter = 0
+# Hyperparameter grid
+PARAM_GRID = {
+    'n_estimators': [300],
+    'max_depth': [7],
+    'min_samples_split': [2, 5, 7],
+    'min_samples_leaf': [2, 5, 7]
+}
 
-    # Initialize TensorBoard writer
-    writer = SummaryWriter()
-    checkpoint_files = os.path.join(chkpt_dir, "chkpt_epoch_{}.pth")
 
-    # Training loop
-    for epoch in range(num_epochs):
-        model.train()  # Set the model to training mode
-        train_loss = 0
-        for inputs, cell_line, targets in tqdm.tqdm(train_dataloader):
-            inputs, cell_line, targets = inputs.to(device), cell_line.to(device), targets.to(device)
+class AutoMLTrainer:
+    """Trains a LGBM Regression Model"""
 
-            # Forward pass
-            outputs = model(inputs, cell_line).squeeze().float()
-            loss = criterion(outputs, targets)
+    def __init__(
+        self,
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        feature_cols,
+        drug_name,
+        fold_assignment
+    ):
+        self.X_train = X_train
+        self.y_train = y_train
+        self.X_test = X_test
+        self.y_test = y_test
+        self.feature_cols = feature_cols
+        self.drug_name = drug_name
+        self.fold_assignment = fold_assignment
 
-            # Backward and optimize
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    def select_features(self):
+        # get the top features
+        selected_feature_names = get_correlated_features(
+            self.y_train.loc[:, "LFC.cb"],
+            self.X_train.values,
+            self.feature_cols
+        )
+        X_train = self.X_train
+        X_test = self.X_test
+        y_train = self.y_train
+        y_test = self.y_test
+        # drop duplicates
+        X_train = X_train.drop_duplicates()
+        X_test = X_test.drop_duplicates()
+        # subset to the key pert and selected features
+        y_train = y_train.loc[y_train.pert_name == self.drug_name, :]
+        y_test = y_test.loc[y_test.pert_name == self.drug_name, :]
+        X_train = y_train.merge(X_train, left_index=True, right_index=True, how='left').loc[:, selected_feature_names]
+        X_test = y_test.merge(X_test, left_index=True, right_index=True, how='left').loc[:, selected_feature_names]
+        y_train = y_train.loc[:, "LFC.cb"]
+        y_test = y_test.loc[:, "LFC.cb"]
+        # get groups for this subset
+        train_groups = [self.fold_assignment[ccle_name] for ccle_name in X_train.index]
 
-            train_loss += loss.item() * inputs.size(0)
+        self.X_train = X_train
+        self.X_test = X_test
+        self.y_train = y_train
+        self.y_test = y_test
+        self.train_groups = train_groups
 
-        train_loss /= len(train_dataloader.dataset)
+    def train(self):        
+        X_train = self.X_train.values
+        X_test = self.X_test.values
+        y_train = self.y_train.values
+        y_test = self.y_test.values
 
-        # Log training loss
-        writer.add_scalar('Loss/Train', train_loss, epoch)
+        # Randomized Search CV for hyperparameter tuning
+        inner_cv = GroupKFold(n_splits=9)
+        rf = RandomForestRegressor(random_state=42, n_jobs=8)
+        search = GridSearchCV(rf, PARAM_GRID, cv=inner_cv, n_jobs=2)
+        search.fit(X_train, y_train, groups=self.train_groups)
 
-        # Validation phase
-        model.eval()  # Set the model to evaluation mode
-        val_loss = 0
-        with torch.no_grad():
-            for inputs, cell_line, targets in val_dataloader:
-                inputs, cell_line, targets = inputs.to(device), cell_line.to(device), targets.to(device)
-                outputs = model(inputs, cell_line).squeeze().float()
-                loss = criterion(outputs, targets)
-                val_loss += loss.item() * inputs.size(0)
+        # Best model
+        best_model = search.best_estimator_
 
-        val_loss /= len(val_dataloader.dataset)
+        self.top_feature_names = self.X_train.columns
+        self.model = best_model
+        
+        # predict
+        y_test_pred = best_model.predict(X_test)
+        explainer = shap.TreeExplainer(best_model)
+        shap_values = explainer.shap_values(X_test)
+        shap_values_df = pd.DataFrame(shap_values, columns=self.X_test.columns)
 
-        # Log validation loss
-        writer.add_scalar('Loss/Validation', val_loss, epoch)
+        # print fold correlation
+        print(f"Fold correlation: {pearsonr(y_test, y_test_pred)[0]}")
 
-        print(f'Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
-        save_checkpoint(model, optimizer, epoch, loss, checkpoint_files)
-
-        # Early stopping logic
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            patience_counter = 0
-            torch.save(model.state_dict(), 'best_model.pth')  # Save the best model
-        else:
-            patience_counter += 1
-
-        if patience_counter >= patience:
-            print("Early stopping triggered")
-            break
-
-    # Close the writer
-    writer.close()
-
-    # Load the best model back
-    model.load_state_dict(torch.load('best_model.pth'))
+        # save to self
+        self.X_test_df = self.X_test
+        self.y_test = y_test
+        self.cell_line_test = self.X_test.index.values
+        self.y_test_pred = y_test_pred
+        self.shap_df = shap_values_df
+        self.test_corr = pearsonr(y_test, y_test_pred)[0]

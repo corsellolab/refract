@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import KFold
-from scipy.stats import pearsonr
 import shap
 import copy
 
@@ -22,19 +21,17 @@ class ImprovedNN(nn.Module):
     def __init__(self, input_size, hidden_size1, hidden_size2, output_size):
         super(ImprovedNN, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size1)
-        self.bn1 = nn.BatchNorm1d(hidden_size1)
         self.relu1 = nn.ReLU()
         
         self.fc2 = nn.Linear(hidden_size1, hidden_size2)
-        self.bn2 = nn.BatchNorm1d(hidden_size2)
         self.relu2 = nn.ReLU()
         
         self.dropout = nn.Dropout(p=0.5)
         self.fc3 = nn.Linear(hidden_size2, output_size)
         
     def forward(self, x):
-        out = self.relu1(self.bn1(self.fc1(x)))
-        out = self.relu2(self.bn2(self.fc2(out)))
+        out = self.relu1(self.fc1(x))
+        out = self.relu2(self.fc2(out))
         out = self.dropout(out)
         out = self.fc3(out)
         return out
@@ -42,25 +39,18 @@ class ImprovedNN(nn.Module):
 class CustomDataset(Dataset):
     def __init__(self, X, y):
         self.features = torch.tensor(X.values, dtype=torch.float32)
-        self.targets = torch.tensor(y.values, dtype=torch.float32).unsqueeze(1)
+        self.targets = torch.tensor(y.values, dtype=torch.float32)
 
-        self.all_features = torch.cat([
-            self.features,
-            add_noise(self.features),
-            scale_features(self.features),
-            scale_features(add_noise(self.features))
-        ])
-        self.all_targets = self.targets.repeat(4, 1)
-    
     def __len__(self):
-        return len(self.all_features)
+        return len(self.features)
     
     def __getitem__(self, idx):
-        return self.all_features[idx], self.all_targets[idx]
+        return self.features[idx], self.targets[idx]
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs):
+def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, patience=5):
     best_model = None
     best_val_loss = float('inf')
+    epochs_without_improvement = 0
 
     for epoch in range(num_epochs):
         model.train()
@@ -70,7 +60,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
-        
+
         model.eval()
         val_loss = 0
         with torch.no_grad():
@@ -78,88 +68,21 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 outputs = model(features)
                 loss = criterion(outputs, targets)
                 val_loss += loss.item()
-        val_loss /= len(val_loader)
-        
+        if len(val_loader) != 0:
+            val_loss /= len(val_loader)
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model = copy.deepcopy(model.state_dict())
+            best_model = copy.deepcopy(model)
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        # Check for early stopping
+        if epochs_without_improvement >= patience:
+            break
 
     return best_model
-
-def nested_cv(X, y, old_model=None, n_splits_outer=5, n_splits_inner=5, output_size=1, learning_rate=1e-6, batch_size=32, num_epochs=100):
-    X.fillna(0, inplace=True)
-    y.fillna(0, inplace=True)
-    input_size = X.shape[1]
-
-    kf_outer = KFold(n_splits=n_splits_outer, shuffle=True, random_state=42)
-    all_predictions = np.zeros_like(y, dtype=float)
-    all_shap_values = []
-
-    for train_idx, test_idx in kf_outer.split(X):
-        X_train_outer, X_test_outer = X.iloc[train_idx], X.iloc[test_idx]
-        y_train_outer, y_test_outer = y.iloc[train_idx], y.iloc[test_idx]
-        
-        best_model = None
-        best_val_loss = float('inf')
-
-        kf_inner = KFold(n_splits=n_splits_inner, shuffle=True, random_state=42)
-        for train_idx_inner, val_idx_inner in kf_inner.split(X_train_outer):
-            X_train_inner, X_val_inner = X_train_outer.iloc[train_idx_inner], X_train_outer.iloc[val_idx_inner]
-            y_train_inner, y_val_inner = y_train_outer.iloc[train_idx_inner], y_train_outer.iloc[val_idx_inner]
-            
-            train_dataset = CustomDataset(X_train_inner, y_train_inner)
-            val_dataset = CustomDataset(X_val_inner, y_val_inner)
-            
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-            
-            model = ImprovedNN(input_size, 512, 256, output_size)
-            if old_model is not None:
-                model.load_state_dict(old_model)
-                for name, param in model.named_parameters():
-                    if name not in ['fc3.weight', 'fc3.bias']:
-                        param.requires_grad = False
-                best_model = old_model
-
-            criterion = nn.MSELoss()
-            optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-            
-            best_inner_model = train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs)
-            val_loss = sum(criterion(model(features), targets).item() for features, targets in val_loader) / len(val_loader)
-            
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model = best_inner_model
-
-        # Use the best model to make predictions on the test set
-        model.load_state_dict(best_model)
-        model.eval()
-        
-        # Calculate SHAP values using DeepExplainer
-        explainer = shap.DeepExplainer(model, torch.tensor(X_train_outer.values, dtype=torch.float))
-        shap_values = explainer.shap_values(torch.tensor(X_test_outer.values, dtype=torch.float))
-        all_shap_values.append(np.abs(shap_values).mean(axis=0))
-        
-        with torch.no_grad():
-            test_dataset = CustomDataset(X_test_outer, y_test_outer)
-            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-            test_predictions = []
-            for features, _ in test_loader:
-                outputs = model(features)
-                test_predictions.extend(outputs.numpy())
-        np.put(all_predictions, test_idx, test_predictions, mode='clip')
-        print("Fold complete")
-
-    # Calculate the dataset-wide SHAP values
-    average_shap_values = np.mean(all_shap_values, axis=0)
-    
-    # Create a dictionary of SHAP values with column names as keys
-    shap_dict = dict(zip(X.columns, average_shap_values))
-    
-    # Sort the dictionary by absolute SHAP values
-    sorted_shap_dict = dict(sorted(shap_dict.items(), key=lambda item: abs(item[1]), reverse=True))
-    
-    return best_model, all_predictions, sorted_shap_dict
 
 def train(cluster_data_folder, num_epochs=100):
     pretrain_csv = next((file for file in os.listdir(cluster_data_folder) if file.endswith('Pretrain.csv')), None)
@@ -171,57 +94,127 @@ def train(cluster_data_folder, num_epochs=100):
     
     # Load the CSV file into a DataFrame
     df = pd.read_csv(cluster_data_path)
+    df = df.drop_duplicates()
+    cell_line_names = df.pop('ccle_name')
     print("Pretrained Dataframe Loaded")
-    X = (df.iloc[:, 2:] - df.iloc[:, 2:].mean()) / df.iloc[:, 2:].std()
-    X = X.apply(pd.to_numeric)
-    y = df.iloc[:, 1]
-
-    input_size = 501  # Assumes top 500 features and drug id
+    drugs = df.select_dtypes(exclude=['number']).columns
+    ids = pd.concat([df.pop(x) for x in drugs], axis=1)
+    ids = ids.astype(int)
+    X = (df.iloc[:, 1:] - df.iloc[:, 1:].mean()) / df.iloc[:, 2:].std()
+    X = pd.concat([X, ids], axis=1)
+    features = list(X.columns)
+    y = df.iloc[:, [0]]
+    X.fillna(0, inplace=True)
+    y.fillna(0, inplace=True)
+    y = y.reset_index(drop=True)
+    X = X.reset_index(drop=True)
+    input_size = X.shape[1]
     output_size = 1
     batch_size = 32
     learning_rate = 0.001
+    n_splits = 5
 
-    print("Starting Pretraining")
-    stats = {}
+    cluster_preds = np.zeros(len(y), dtype=float)
+    cluster_shap = []
+    finetune_preds = np.zeros(len(y), dtype=float)
+    finetune_shap = {drug: [] for drug in drugs}
+    single_drug_preds = np.zeros(len(y), dtype=float)
+    single_drug_shap = {drug: [] for drug in drugs}
 
-    # Pretrain
-    pretrained_model, pretrained_preds, pretrained_shap_values = nested_cv(X, y, num_epochs=num_epochs, output_size=output_size)
-    pretrained_preds_tensor = torch.tensor(pretrained_preds, dtype=torch.float32)
-    y_tensor = torch.tensor(y.values, dtype=torch.float32).unsqueeze(1)
-    model_pc = pearsonr(y_tensor.squeeze(), pretrained_preds_tensor.squeeze())
-    print(f'Pretraining Model PC: {model_pc}')
-    stats['Cluster Level Model'] = model_pc
-    cluster_df = pd.DataFrame([pretrained_shap_values])
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    for train_idx, test_idx in kf.split(X):
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
-    models = {}
-    num_drugs = len(drug_files)
-    for drug_file in drug_files:
-        drug_id = os.path.basename(drug_file).split('_')[-1].split('.')[0]
-        df = pd.read_csv(drug_file)
-        X_finetune = (df.iloc[:, 2:] - df.iloc[:, 2:].mean()) / df.iloc[:, 2:].std()
-        y_finetune = df.iloc[:, 1].reset_index(drop=True)
-        
-        print("Starting finetuning")
-        cluster_model, finetune_preds, finetune_shap_values = nested_cv(X_finetune, y_finetune, old_model=pretrained_model, num_epochs=num_epochs, output_size=output_size)
-        print("Starting control training")
-        raw_model, raw_preds, raw_shap_values = nested_cv(X_finetune, y_finetune, num_epochs= (num_drugs+1) * num_epochs, output_size=output_size)
-        
-        y_finetune_tensor = torch.tensor(y_finetune.values, dtype=torch.float32).unsqueeze(1)
-        finetune_preds_tensor = torch.tensor(finetune_preds, dtype=torch.float32)
-        raw_preds_tensor = torch.tensor(raw_preds, dtype=torch.float32)
-        finetune_pc = pearsonr(y_finetune_tensor.squeeze(), finetune_preds_tensor.squeeze())
-        raw_pc = pearsonr(y_finetune_tensor.squeeze(), raw_preds_tensor.squeeze())
+        train_dataset = CustomDataset(X_train, y_train)
+        test_dataset = CustomDataset(X_test, y_test)
 
-        stats[f'Finetuned_Model_{drug_id}'] = finetune_pc
-        stats[f'Raw_Model_{drug_id}'] = raw_pc
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-        finetune_df = pd.DataFrame([finetune_shap_values])
-        raw_df = pd.DataFrame([raw_shap_values])
+        pretrained_model = ImprovedNN(input_size, 512, 256, output_size)
+        criterion = nn.MSELoss()
+        optimizer = optim.AdamW(pretrained_model.parameters(), lr=learning_rate)
 
-        models[drug_id] = (finetune_df, raw_df)
-        print(f"Drug: {drug_id}, Finetuned PC: {finetune_pc}, Standard PC: {raw_pc}")
 
-    return pretrained_model, cluster_df, stats, models
+
+        # Train the model
+        pretrained_model = train_model(pretrained_model, train_loader, test_loader, criterion, optimizer, num_epochs)
+        pretrained_state = pretrained_model.state_dict()
+
+        # Compute SHAP values for the cluster model
+        cluster_explainer = shap.DeepExplainer(pretrained_model, torch.tensor(X_train.values, dtype=torch.float32))
+        cluster_shap_values = cluster_explainer.shap_values(torch.tensor(X_test.values, dtype=torch.float32))
+        cluster_shap.append(np.abs(cluster_shap_values).mean(axis=0))
+
+        # Predictions with the pretrained model
+        cluster_preds[test_idx] = pretrained_model(torch.tensor(X_test.values, dtype=torch.float32)).detach().numpy().flatten()
+
+        for drug in drugs:
+            drug_test_X = X_test[X_test[drug] == 1]
+    
+            finetune_model = ImprovedNN(input_size, 512, 256, output_size)
+            raw_model = ImprovedNN(input_size, 512, 256, output_size)
+            finetune_model.load_state_dict(pretrained_state)
+            for name, param in finetune_model.named_parameters():
+                if name not in ['fc3.weight', 'fc3.bias']:
+                    param.requires_grad = False
+            finetune_optimizer = optim.AdamW(finetune_model.parameters(), lr=learning_rate)
+            raw_optimizer = optim.AdamW(raw_model.parameters(), lr=learning_rate)
+
+            # Filter data for the current drug
+            X_finetune = X_train[X_train[drug] == 1]
+            y_finetune = y_train.loc[X_finetune.index, :]
+
+            train_dataset = CustomDataset(X_finetune, y_finetune)
+            test_dataset = CustomDataset(drug_test_X, y_test.loc[drug_test_X.index, :])
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+            # Fine-tune the model
+            finetune_model = train_model(finetune_model, train_loader, test_loader, criterion, finetune_optimizer, num_epochs)
+            raw_model = train_model(raw_model, train_loader, test_loader, criterion, raw_optimizer, num_epochs)
+
+            # Compute SHAP values for fine-tuned and raw models
+            finetune_explainer = shap.DeepExplainer(finetune_model, torch.tensor(X_finetune.values, dtype=torch.float32))
+            raw_explainer = shap.DeepExplainer(raw_model, torch.tensor(X_finetune.values, dtype=torch.float32))
+
+            finetune_shap_values = finetune_explainer.shap_values(torch.tensor(X_finetune.values, dtype=torch.float32))
+            raw_shap_values = raw_explainer.shap_values(torch.tensor(X_finetune.values, dtype=torch.float32))
+
+            finetune_shap[drug].append(np.abs(finetune_shap_values).mean(axis=0))
+            single_drug_shap[drug].append(np.abs(raw_shap_values).mean(axis=0))
+
+            # Predictions with fine-tuned and raw models
+            finetune_preds[drug_test_X.index] = finetune_model(torch.tensor(drug_test_X.values, dtype=torch.float32)).detach().numpy().flatten()
+            single_drug_preds[drug_test_X.index] = raw_model(torch.tensor(drug_test_X.values, dtype=torch.float32)).detach().numpy().flatten()
+
+    # Compute average SHAP values for each drug
+    cluster_shap = np.mean(cluster_shap, axis=0)
+    average_finetune_shap = {drug: np.mean(finetune_shap[drug], axis=0) for drug in drugs}
+    average_single_drug_shap = {drug: np.mean(single_drug_shap[drug], axis=0) for drug in drugs}
+
+   
+    cluster_shap = dict(zip(features, cluster_shap))
+   
+    dfs = {}
+    preds = pd.DataFrame(zip(cluster_preds, finetune_preds, single_drug_preds, y['LFC.cb']), columns=['Cluster Level Prediction', 'Finetune Prediction', 'Raw Prediction', 'LFC.cb'], index=cell_line_names)
+    cluster_shap_values = pd.DataFrame([cluster_shap]).transpose()
+    cluster_shap_values.columns = ['Cluster']
+
+    for key in average_finetune_shap.keys():
+        drug_df = pd.DataFrame.from_records([average_finetune_shap[key], average_single_drug_shap[key]])
+        drug_df = drug_df.transpose().reset_index()
+        drug_df['index'] = features
+        drug_df = drug_df.set_index('index')
+        drug_df.columns = [f"Finetune {key}", f"Single Drug {key}"]
+        dfs[key] = drug_df
+
+
+    shap_values = cluster_shap_values.join(list(dfs.values()),how='inner')
+    pearson_correlations = (preds.corrwith(preds['LFC.cb']))
+    return pearson_correlations, preds, shap_values
+   
 
 def main():
     return

@@ -24,6 +24,7 @@ def load_cluster_data(cluster_df, feature_df, cluster_id, responses_dir):
     for drug in list(cluster_df['pert_name']):
         drugs.append(drug)
         for file in glob.glob(os.path.join(responses_dir, f'{drug}*.csv')):
+            print(file)
             df = pd.read_csv(file)
             df = df[['LFC.cb', 'ccle_name']]
             df = df.merge(feature_df, on="ccle_name")
@@ -34,14 +35,17 @@ def load_cluster_data(cluster_df, feature_df, cluster_id, responses_dir):
     
 
     pretrain_df = pd.concat(data_frames)
-    pretrain_df = pretrain_df.set_index('ccle_name')
+    pretrain_df = pretrain_df.reset_index()
+    # pretrain_df = pretrain_df.set_index('ccle_name')
     one_hot = pd.get_dummies(pretrain_df['ID'])
 
     print("Getting correlations")
-    corr = dict(pretrain_df.drop(columns=['ID']).corrwith(pretrain_df['LFC.cb']))
+    corr = dict(pretrain_df.drop(columns=['ID','ccle_name']).corrwith(pretrain_df['LFC.cb']))
     top_features = sorted(corr, key=lambda k: abs(corr[k]), reverse=True)[:502]
     if 'ID' in top_features:
         top_features.remove('ID')
+    if 'ccle_name' not in top_features:
+        top_features.append('ccle_name')
 
     pretrain_df = pretrain_df[top_features]
     pretrain_df = pretrain_df.join(one_hot)

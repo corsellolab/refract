@@ -18,7 +18,7 @@ import scipy
 
 def main(out_dir, cluster_number, storage_dir):
     print("Starting Data Processing")
-    # process_data(cluster_number,storage_dir + '/clusters200_with_viability.csv', storage_dir + '/processed_data/x-all.csv', storage_dir + '/responses', out_dir + '/Data')
+    process_data(cluster_number,storage_dir + '/clusters200_with_viability.csv', storage_dir + '/processed_data/x-all.csv', storage_dir + '/responses', out_dir + '/Data')
     data_dir = out_dir + f"/Data/cluster_{str(cluster_number)}_responses"
     print("Starting Training")
     pearson_correlations, preds, shap_values = train(data_dir, num_epochs=10000)

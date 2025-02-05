@@ -143,3 +143,7 @@ tests/data/test_output
 
 # tensorflow stuff 
 runs/
+
+# remove nextflow things
+.nextflow*
+work/

@@ -1,20 +1,19 @@
-process SELECT_FEATURES {
-    publishDir params.split_output_dir, mode: 'copy'
+process SELECT_FEATURES_REFRACT {
+    publishDir params.output_dir, mode: 'copy'
 
     input:
-    path feature_file
-    path response_file
+    tuple val(response_name), path(response_file)
 
     output:
-    path "split_data"
+    path "${response_name}"
 
-    script:
+    script:    
     """
-    mkdir -p split_data
-    python ${projectDir}/refract/scripts/select_features.py \
-        --feature_file ${feature_file} \
+    mkdir -p ${response_name}
+    python ${params.pipeline_script_dir}/select_features.py \
+        --feature_file ${params.feature_path} \
         --response_file ${response_file} \
-        --output_dir split_data \
+        --output_dir ${response_name} \
         --n_splits ${params.n_splits} \
         --feature_fraction ${params.feature_fraction}
     """

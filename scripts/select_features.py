@@ -29,7 +29,12 @@ def main():
     # Load and preprocess data
     feature_df = load_feature_df(args.feature_file)
     response_df = load_response_df(args.response_file)
+
     response_df, feature_df = intersect_depmap_ids(response_df, feature_df)
+
+    # Add debug prints to check DataFrame sizes
+    print(f"Response DataFrame shape before splits: {response_df.shape}")
+    print(f"Unique deciles in response_df: {response_df['decile'].unique()}")
     
     # Get data splits
     splits = get_data_splits(response_df, n_splits=args.n_splits)

@@ -10,14 +10,14 @@ import pandas as pd
 import numpy as np
 
 def get_correlated_features(response_df, feature_df, executor=None):
+    # Ensure both dataframes have the same indices and are aligned
+    common_ids = response_df.index.intersection(feature_df.index)
+    response_df = response_df.loc[common_ids]
+    feature_df = feature_df.loc[common_ids]
+    
     y = response_df["LFC"].values
-    ids = response_df["depmap_id"].values
-
-    # ensure the feature df index aligns with ids
-    feature_sub_df = feature_df.loc[ids]
-    feature_names = feature_sub_df.columns.to_numpy()
-    X = feature_sub_df.values
-
+    feature_names = feature_df.columns.to_numpy()
+    X = feature_df.values
     n_features = X.shape[1]
 
     def compute_kendall(idx):
@@ -60,5 +60,9 @@ def get_top_p_features(feat_corr_df, p):
     top_p_features = []
     for feature_class, group in feat_corr_df.groupby('feature_class'):
         n = int(p * len(group))
-        top_p_features.append(group.nlargest(n, 'correlation'))
+        if "LIN" in feature_class:
+            # use all features
+            top_p_features.append(group)
+        else:
+            top_p_features.append(group.nlargest(n, 'correlation'))
     return pd.concat(top_p_features)

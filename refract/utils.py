@@ -6,17 +6,12 @@ from glob import glob
 
 def load_feature_df(feature_path):
     feature_df = pd.read_pickle(feature_path)
-    # rename first column as depmap_id
-    feature_df.rename(columns={feature_df.columns[0]: 'depmap_id'}, inplace=True)
-    # set depmap_id as index
-    feature_df.set_index('depmap_id', inplace=True)
-
+    # rename index to depmap_id
+    feature_df.index.name = 'depmap_id'
     # drop columns where all values are NaN
     feature_df = feature_df.dropna(axis=1, how='all')
-
     # drop columns where all values are the same
     feature_df = feature_df.loc[:, (feature_df != feature_df.iloc[0]).any()]
-
     return feature_df
 
 def load_response_df(response_path):
@@ -32,12 +27,26 @@ def load_response_df(response_path):
     return response_df
 
 def intersect_depmap_ids(response_df, feature_df):
-    depmap_ids = set(response_df.depmap_id.values)
+    # Add debug prints
+    print(f"Initial response_df shape: {response_df.shape}")
+    print(f"Initial feature_df shape: {feature_df.shape}")
+    
+    depmap_ids = set(response_df.index.values)
     feature_depmap_ids = set(feature_df.index.values)
     intersecting_depmap_ids = depmap_ids.intersection(feature_depmap_ids)
-
-    # subset both
+    
+    # Add validation
+    if len(intersecting_depmap_ids) == 0:
+        raise ValueError("No overlapping DepMap IDs found between response and feature data")
+    
+    # Convert the set to a list before using it as an indexer
+    intersecting_depmap_ids = list(intersecting_depmap_ids)
+    
     response_df = response_df.loc[intersecting_depmap_ids]
     feature_df = feature_df.loc[intersecting_depmap_ids]
-
+    
+    # Add debug prints
+    print(f"Final response_df shape: {response_df.shape}")
+    print(f"Final feature_df shape: {feature_df.shape}")
+    
     return response_df, feature_df

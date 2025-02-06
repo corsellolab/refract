@@ -79,12 +79,16 @@ def summarize_model_results(model_dir: str, output_dir: str):
     shap_df = concatenate_fold_results(model_dir, '*_shap_values.csv')
     # get the column order
     col_order = shap_df.columns
+    # get the index order
+    index_order = shap_df.index
     shap_df.to_csv(f'{output_dir}/combined_shap_values.csv', index=False)
 
     # Concatenate test data
     X_test_df = concatenate_fold_results(model_dir, '*_X_test.csv')
     # make the column order the same
     X_test_df = X_test_df.loc[:, col_order]
+    # make the index order the same
+    X_test_df = X_test_df.loc[index_order]
     X_test_df.to_csv(f'{output_dir}/combined_X_test.csv', index=False)
 
     # Concatenate predictions

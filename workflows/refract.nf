@@ -1,6 +1,8 @@
 include { SELECT_FEATURES_REFRACT } from '../modules/split_data'
+include { TRAIN_REFRACT_MODEL } from '../modules/train_refract_model'
+include { VISUALIZE_MODEL } from '../modules/visualize_model'
 
-workflow train_refract {
+workflow run_refract {
     take:
         dev_mode
 
@@ -18,6 +20,17 @@ workflow train_refract {
 
         // Run feature selection for each response using the module
         SELECT_FEATURES_REFRACT(
-            named_responses
+            named_responses,
+            params.feature_path
+        )
+
+        // Train models using the selected features
+        TRAIN_REFRACT_MODEL(
+            SELECT_FEATURES_REFRACT.out
+        )
+
+        // Add visualization step
+        VISUALIZE_MODEL(
+            TRAIN_REFRACT_MODEL.out
         )
 }

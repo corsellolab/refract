@@ -60,7 +60,9 @@ def get_top_p_features(feat_corr_df, p):
     top_p_features = []
     for feature_class, group in feat_corr_df.groupby('feature_class'):
         n = int(p * len(group))
-        if "LIN" in feature_class:
+        if n < 1:
+            n = 1
+        if "OMIC" in feature_class or "ONC" in feature_class:
             # use all features
             top_p_features.append(group)
         else:

@@ -1,4 +1,5 @@
 include { SELECT_FEATURES_REFRACT } from '../modules/split_data'
+include { RUN_MTS_BASELINE } from '../modules/mts_baseline'
 include { TRAIN_REFRACT_MODEL } from '../modules/train_refract_model'
 include { VISUALIZE_MODEL } from '../modules/visualize_model'
 
@@ -22,6 +23,12 @@ workflow run_refract {
         SELECT_FEATURES_REFRACT(
             named_responses,
             params.feature_path
+        )
+
+        // Run MTS baseline using the same splits
+        RUN_MTS_BASELINE(
+            SELECT_FEATURES_REFRACT.out.map { name, response, _feature_path, splits -> tuple(name, response, splits) },
+            params.feature_path_rds  // Use the RDS file for R script
         )
 
         // Train models using the selected features

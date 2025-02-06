@@ -13,5 +13,7 @@ process VISUALIZE_MODEL {
     python ${params.pipeline_script_dir}/visualize_model.py \
         --model_dir ${model_dir} \
         --output_dir ${model_dir.baseName}_viz
+    # copy model performance summary to output directory
+    cp ${model_dir}/model_performance_summary.csv ${model_dir.baseName}_viz/
     """
 } 

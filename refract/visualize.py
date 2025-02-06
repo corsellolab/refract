@@ -81,7 +81,7 @@ def summarize_model_results(model_dir: str, output_dir: str):
     col_order = shap_df.columns
     # get the index order
     index_order = shap_df.index
-    shap_df.to_csv(f'{output_dir}/combined_shap_values.csv', index=False)
+    shap_df.to_csv(f'{output_dir}/combined_shap_values.csv')
 
     # Concatenate test data
     X_test_df = concatenate_fold_results(model_dir, '*_X_test.csv')
@@ -89,11 +89,11 @@ def summarize_model_results(model_dir: str, output_dir: str):
     X_test_df = X_test_df.loc[:, col_order]
     # make the index order the same
     X_test_df = X_test_df.loc[index_order]
-    X_test_df.to_csv(f'{output_dir}/combined_X_test.csv', index=False)
+    X_test_df.to_csv(f'{output_dir}/combined_X_test.csv')
 
     # Concatenate predictions
     pred_df = concatenate_fold_results(model_dir, '*_test_predictions.csv')
-    pred_df.to_csv(f'{output_dir}/combined_predictions.csv', index=False)
+    pred_df.to_csv(f'{output_dir}/combined_predictions.csv')
 
     # Create SHAP summary plot
     # fill shap with 0s for missing values

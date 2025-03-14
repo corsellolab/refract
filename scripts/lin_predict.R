@@ -138,7 +138,7 @@ for (fold in unique_folds) {
     # Store predictions
     fold_predictions <- data.frame(
       depmap_id = test_data$depmap_id,
-      fold = fold,
+      fold = as.character(fold),  # Convert fold to character
       actual = test_data$LFC,
       predicted = as.vector(result$predictions)
     )
@@ -147,7 +147,7 @@ for (fold in unique_folds) {
     # Store coefficients
     if (nrow(result$coefficients) > 0) {
       fold_coefficients <- result$coefficients %>%
-        mutate(fold = fold,
+        mutate(fold = as.character(fold),  # Convert fold to character
                abs_coefficient = abs(coefficient))
       all_coefficients <- bind_rows(all_coefficients, fold_coefficients)
     }
@@ -160,7 +160,7 @@ for (fold in unique_folds) {
     fold_metrics <- bind_rows(
       fold_metrics,
       data.frame(
-        fold = fold,
+        fold = as.character(fold),  # Convert fold to character
         correlation = cor_value,
         r_squared = r2_value,
         rmse = result$rmse,
@@ -183,6 +183,18 @@ overall_r2 <- 1 - sum((all_predictions$actual - all_predictions$predicted)^2) /
                   sum((all_predictions$actual - mean(all_predictions$actual))^2)
 overall_rmse <- sqrt(mean((all_predictions$actual - all_predictions$predicted)^2))
 overall_mae <- mean(abs(all_predictions$actual - all_predictions$predicted))
+
+# Add overall metrics to fold_metrics
+fold_metrics <- bind_rows(
+  fold_metrics,
+  data.frame(
+    fold = "overall",
+    correlation = overall_correlation,
+    r_squared = overall_r2,
+    rmse = overall_rmse,
+    mae = overall_mae
+  )
+)
 
 cat("\nOverall performance:")
 cat("\n  Pearson correlation:", round(overall_correlation, 4))

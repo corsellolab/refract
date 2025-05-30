@@ -4,11 +4,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from glob import glob
 import shap
-from shap import TreeExplainer, summary_plot
+from shap import TreeExplainer, summary_plot, LinearExplainer
 import xgboost as xgb
 import pickle
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Tuple, List, Optional
+from sklearn.linear_model import Lasso
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error
+from sklearn.impute import SimpleImputer
 
 from .utils import (
     load_feature_df, load_response_df, intersect_depmap_ids,
@@ -97,6 +101,11 @@ class BaseTrainer(ABC):
         feature_df = load_feature_df(feature_file)
         response_df = load_response_df(response_file)
         response_df, feature_df = intersect_depmap_ids(response_df, feature_df)
+
+        # get the drug name from the response df
+        drug_name = response_df["name"].values[0]
+        # get the response name from the response file
+        response_name = response_df["broad_id"].values[0]
         
         # Store all predictions for overall metrics
         all_val_true = []
@@ -158,6 +167,8 @@ class BaseTrainer(ABC):
                 'test_rmse': test_metrics['rmse'],
                 'test_r2': test_metrics['r2'],
                 'test_pearson': test_metrics['pearson'],
+                'drug_name': drug_name,
+                'response_name': response_name
             })
         
         # Calculate overall metrics
@@ -181,7 +192,9 @@ class BaseTrainer(ABC):
             'val_pearson': overall_val_metrics['pearson'],
             'test_rmse': overall_test_metrics['rmse'],
             'test_r2': overall_test_metrics['r2'],
-            'test_pearson': overall_test_metrics['pearson']
+            'test_pearson': overall_test_metrics['pearson'],
+            'drug_name': drug_name,
+            'response_name': response_name
         }
         self.fold_results.append(overall_results)
         
@@ -191,6 +204,15 @@ class BaseTrainer(ABC):
         self.save_all_test_predictions(all_test_ids, all_test_true, all_test_pred)
         self.save_trainer()
         save_prediction_scatter(all_test_pred, all_test_true, os.path.join(self.output_dir, 'predictions_scatter.png'))
+
+        # save response file and path to feature file
+        # save response file to output directory
+        response_df = load_response_df(response_file)
+        response_df.to_csv(os.path.join(self.output_dir, 'response_file.csv'), index=False)
+
+        # save path to the feature file
+        with open(os.path.join(self.output_dir, 'path_to_feature_file.txt'), 'w') as f:
+            f.write(feature_file)
         
         return {
             'models': self.models,
@@ -258,15 +280,6 @@ class BaseTrainer(ABC):
         """Save the trainer object to a pkl file"""
         with open(os.path.join(self.output_dir, 'trainer.pkl'), 'wb') as f:
             pickle.dump(self, f)
-
-         # save response file to output directory
-        response_df = load_response_df(self.response_file)
-        response_df.to_csv(os.path.join(self.output_dir, 'response_file.csv'), index=False)
-
-        # save path to the feature file
-        with open(os.path.join(self.output_dir, 'path_to_feature_file.txt'), 'w') as f:
-            f.write(self.feature_file)
-
 
 class XGBoostTrainer(BaseTrainer):
     """
@@ -476,5 +489,235 @@ class XGBoostTrainer(BaseTrainer):
 
         # save shap summary plot
         save_shap_summary_plot(shap_values, test_data, os.path.join(self.output_dir, 'feature_importance', 'shap_summary.png'))
+
+class LinearTrainer(BaseTrainer):
+    """
+    Linear regression trainer with L1 regularization that implements the BaseTrainer interface.
+    
+    This class provides Lasso regression implementations for training,
+    prediction, and feature importance analysis using SHAP values.
+    """
+    
+    def __init__(
+        self, 
+        output_dir: str, 
+        n_threads: int = 8,
+        alphas: List[float] = None,
+        max_iter: int = 10000,
+        **lasso_params
+    ):
+        """
+        Initialize the Linear trainer.
+        
+        Parameters:
+        output_dir (str): Directory to save results and models.
+        n_threads (int): Number of threads to use for training (not used for Lasso).
+        alphas (List[float]): List of alpha values to try for regularization.
+        max_iter (int): Maximum number of iterations for convergence.
+        **lasso_params: Additional Lasso parameters to override defaults.
+        """
+        super().__init__(output_dir, n_threads)
+        
+        # Default alpha values to search over
+        if alphas is None:
+            self.alphas = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+        else:
+            self.alphas = alphas
+            
+        self.max_iter = max_iter
+        
+        # Default Lasso parameters
+        self.default_params = {
+            'max_iter': self.max_iter,
+            'random_state': 42,
+            'selection': 'random'
+        }
+        
+        # Update with any provided parameters
+        self.default_params.update(lasso_params)
+        
+        # Store scalers for each fold
+        self.scalers = []
+    
+    def train_single_model(self, X_train, y_train, X_val, y_val, **kwargs):
+        """
+        Train a single Lasso model with hyperparameter optimization using validation set.
+        
+        Parameters:
+        X_train: Training features
+        y_train: Training targets
+        X_val: Validation features
+        y_val: Validation targets
+        **kwargs: Additional parameters (currently unused)
+        
+        Returns:
+        dict: Dictionary containing the trained model, scaler, and imputer
+        """
+        # Handle missing values with median imputation
+        imputer = SimpleImputer(strategy='median')
+        X_train_imputed = imputer.fit_transform(X_train)
+        X_val_imputed = imputer.transform(X_val)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_imputed)
+        X_val_scaled = scaler.transform(X_val_imputed)
+        
+        best_alpha = None
+        best_score = float('inf')
+        best_model = None
+        
+        # Try different alpha values and select best based on validation performance
+        for alpha in self.alphas:
+            model = Lasso(alpha=alpha, **self.default_params)
+            model.fit(X_train_scaled, y_train)
+            
+            val_pred = model.predict(X_val_scaled)
+            val_rmse = np.sqrt(mean_squared_error(y_val, val_pred))
+            
+            if val_rmse < best_score:
+                best_score = val_rmse
+                best_alpha = alpha
+                best_model = model
+        
+        print(f"Best alpha: {best_alpha}, Validation RMSE: {best_score:.4f}")
+        
+        # Store the scaler for this fold
+        self.scalers.append(scaler)
+        
+        return {
+            'model': best_model,
+            'scaler': scaler,
+            'imputer': imputer,
+            'best_alpha': best_alpha,
+            'best_score': best_score
+        }
+    
+    def predict(self, model_dict, X):
+        """
+        Make predictions using a trained Lasso model.
+        
+        Parameters:
+        model_dict: Dictionary containing trained model, scaler, and imputer
+        X: Features to make predictions on
+        
+        Returns:
+        Array of predictions
+        """
+        model = model_dict['model']
+        scaler = model_dict['scaler']
+        imputer = model_dict['imputer']
+        
+        X_imputed = imputer.transform(X)
+        X_scaled = scaler.transform(X_imputed)
+        return model.predict(X_scaled)
+    
+    def _compute_top_features_by_shap(self, shap_values, feature_names):
+        # fill nans with 0
+        shap_values = shap_values.fillna(0)
+        mean_abs_shap = np.abs(shap_values).mean(axis=0)
+        feature_importance = pd.DataFrame({
+            "feature": feature_names,
+            "importance": mean_abs_shap
+        })
+        feature_importance = feature_importance.sort_values(
+            "importance", ascending=False
+        )
+        return feature_importance
+
+    def _compute_cv_shap_importance(
+        self,
+        models: list,  # List of 10 trained model dicts from CV
+        X_test_folds: list,  # List of test sets from each fold
+    ) -> Dict[str, Any]:
+        """
+        Compute aggregated SHAP feature importance across CV folds.
+        
+        Args:
+            models: List of trained model dictionaries from each CV fold
+            X_test_folds: List of test DataFrames from each fold
+            
+        Returns:
+            Dictionary with aggregated SHAP results
+        """
+        all_shap_values = []
+        all_test_data = []
+        
+        # Compute SHAP values for each fold
+        for i, (model_dict, X_test) in enumerate(zip(models, X_test_folds)):
+            model = model_dict['model']
+            scaler = model_dict['scaler']
+            imputer = model_dict['imputer']
+            
+            # Handle missing values with median imputation
+            X_test_imputed = imputer.transform(X_test)
+            X_test_scaled = scaler.transform(X_test_imputed)
+            
+            # Create SHAP explainer for linear model
+            explainer = shap.LinearExplainer(model, X_test_scaled)
+            shap_values = explainer.shap_values(X_test_scaled)
+            
+            shap_value_df = pd.DataFrame(shap_values, columns=X_test.columns)
+
+            all_shap_values.append(shap_value_df)
+            all_test_data.append(X_test)
+        
+        # Concatenate all SHAP values and test data
+        combined_shap_values = pd.concat(all_shap_values, axis=0)
+        combined_test_data = pd.concat(all_test_data, axis=0)
+        
+        # Compute feature importance using aggregated SHAP values
+        feature_importance = self._compute_top_features_by_shap(
+            combined_shap_values, 
+            combined_test_data.columns.tolist()
+        )
+        
+        return {
+            'combined_shap_values': combined_shap_values,
+            'combined_test_data': combined_test_data,
+            'feature_importance': feature_importance,
+            'feature_names': combined_test_data.columns.tolist()
+        }
+    
+    def compute_feature_importance(self):
+        """
+        Compute SHAP-based feature importance for Linear model.
+            
+        Returns:
+        Dictionary containing SHAP results and top features
+        """
+        feature_importance = self._compute_cv_shap_importance(
+            self.models,
+            self.all_test_X
+        )
+        return feature_importance
+        
+
+    def save_feature_importance(self):
+        """
+        Save SHAP analysis results to disk. To subdir feature_importance
+        """
+        # get and save the feature importance results
+        feature_importance = self.compute_feature_importance()
+        shap_values = feature_importance['combined_shap_values']
+        test_data = feature_importance['combined_test_data']
+        feature_importance = feature_importance['feature_importance']
+
+        # save to output directory
+        if not os.path.exists(os.path.join(self.output_dir, 'feature_importance')):
+            os.makedirs(os.path.join(self.output_dir, 'feature_importance'))
+        feature_importance.to_csv(os.path.join(self.output_dir, 'feature_importance', 'feature_importance.csv'), index=False)
+        shap_values.to_csv(os.path.join(self.output_dir, 'feature_importance', 'shap_values.csv'), index=False)
+        test_data.to_csv(os.path.join(self.output_dir, 'feature_importance', 'test_data.csv'), index=False)
+
+        # save shap summary plot
+        save_shap_summary_plot(shap_values, test_data, os.path.join(self.output_dir, 'feature_importance', 'shap_summary.png'))
+
+    def save_models(self):
+        """Save models and scalers as pkl files to subdir models"""
+        os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
+        for i, model_dict in enumerate(self.models):
+            with open(os.path.join(self.output_dir, 'models', f'model_{i}.pkl'), 'wb') as f:
+                pickle.dump(model_dict, f)
 
 

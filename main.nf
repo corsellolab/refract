@@ -29,9 +29,8 @@ workflow {
 
     // Limit to 2 files if in dev mode
     if (params.dev) {
-        response_ch = response_ch.take(2)
+        response_ch = response_ch.take(100)
     }
-    response_ch.view()
 
     // Call train_all workflow
     train_all(response_ch, params.feature_path_pkl)

@@ -22,7 +22,7 @@ def save_shap_summary_plot(shap_values: pd.DataFrame, X_test: pd.DataFrame, outp
 def save_prediction_scatter(pred, true, output_path):
     """Save prediction scatter plot to output path"""
     plt.figure(figsize=(10, 8))
-    sns.scatterplot(x=pred, y=true, alpha=0.5)
+    sns.scatterplot(x=true, y=pred, alpha=0.5)
 
     lims = [
         min(min(pred), min(true)),

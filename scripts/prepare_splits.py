@@ -48,7 +48,7 @@ def main():
     parser.add_argument('--n_splits', type=int, default=10, help='Number of splits for cross-validation')
     parser.add_argument('--n_features', type=int, default=50, help='Number of features to select per class')
     parser.add_argument('--train_val_split', type=float, default=0.8, help='Fraction of data to use for training and validation')
-    parser.add_argument('--n_jobs', type=int, default=1, help='Number of jobs to run in parallel')
+    #parser.add_argument('--n_jobs', type=int, default=1, help='Number of jobs to run in parallel')
     
     args = parser.parse_args()
     
@@ -70,7 +70,9 @@ def main():
     
     # Process splits in parallel
     # Create a list of all split data upfront
+    """
     split_data = []
+    
     for split_idx in range(len(splits)):
         train_response, test_response, train_features, _ = get_data_for_split(
             response_df, feature_df, splits, split_idx
@@ -95,6 +97,20 @@ def main():
     # Print completion messages
     for split_idx in results:
         print(f"Completed split {split_idx}")
+    """
+    # Process splits sequentially
+    for split_idx in range(len(splits)):
+        train_response, test_response, train_features, _ = get_data_for_split(
+            response_df, feature_df, splits, split_idx
+        )
+        train_response_final, val_response, train_features_final, val_features = train_test_split(
+            train_response, 
+            train_features,
+            train_size=args.train_val_split,
+            random_state=42 + split_idx
+        )
+        process_split(split_idx, train_response_final, val_response, test_response, train_features_final, args)
+
 
 if __name__ == "__main__":
     main()

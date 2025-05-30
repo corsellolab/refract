@@ -2,12 +2,12 @@ process TRAIN_XGBOOST_MODEL {
     publishDir "${params.output_dir}/${response_name}", mode: 'copy', pattern: "xgboost_model"
     conda params.conda_env
 
+    // Resource requirements
+    cpus params.n_threads
+    memory "${params.n_threads * 2} GB"
 
     input:
-    tuple val(response_name), path(response_file)
-    path(feature_path)
-    path(split_dir)
-
+    tuple val(response_name), path(response_file), path(feature_path), path(split_dir)
 
     output:
     path "xgboost_model"

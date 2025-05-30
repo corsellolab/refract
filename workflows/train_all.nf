@@ -4,6 +4,7 @@ include { SPLIT_DATA } from "../modules/split_data.nf"
 include { TRAIN_XGBOOST_MODEL } from "../modules/train_xgboost_model.nf"
 include { TRAIN_LINEAR_MODEL } from "../modules/train_linear_model.nf"
 include { TRAIN_RANDOM_FOREST_MODEL } from "../modules/train_random_forest_model.nf"
+include { TRAIN_QUANTILE_REGRESSION_MODEL } from "../modules/train_quantile_regression_model.nf"
 
 workflow train_all {
     take:
@@ -22,4 +23,7 @@ workflow train_all {
 
     // train random forest model
     TRAIN_RANDOM_FOREST_MODEL(SPLIT_DATA.out)
+
+    // train quantile regression model
+    TRAIN_QUANTILE_REGRESSION_MODEL(SPLIT_DATA.out)
 }

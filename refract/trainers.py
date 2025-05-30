@@ -14,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import QuantileRegressor
 
 from .utils import (
     load_feature_df, load_response_df, intersect_depmap_ids,
@@ -946,6 +947,258 @@ class RandomForestTrainer(BaseTrainer):
 
     def save_models(self):
         """Save models and imputers as pkl files to subdir models"""
+        os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
+        for i, model_dict in enumerate(self.models):
+            with open(os.path.join(self.output_dir, 'models', f'model_{i}.pkl'), 'wb') as f:
+                pickle.dump(model_dict, f)
+
+class QuantileRegressionTrainer(BaseTrainer):
+    """
+    Quantile Regression trainer that implements the BaseTrainer interface.
+    
+    This class provides Quantile Regression implementations for training,
+    prediction, and feature importance analysis using SHAP values.
+    Focuses on the 0.1 quantile (10th percentile) using pinball loss.
+    """
+    
+    def __init__(
+        self, 
+        output_dir: str, 
+        n_threads: int = 8,
+        quantile: float = 0.1,
+        alphas: List[float] = None,
+        solvers: List[str] = None,
+        **qr_params
+    ):
+        """
+        Initialize the Quantile Regression trainer.
+        
+        Parameters:
+        output_dir (str): Directory to save results and models.
+        n_threads (int): Number of threads to use for training.
+        quantile (float): Quantile to estimate (default: 0.1 for bottom 10%).
+        alphas (List[float]): List of alpha values for regularization.
+        solvers (List[str]): List of solvers to try.
+        **qr_params: Additional QuantileRegressor parameters to override defaults.
+        """
+        super().__init__(output_dir, n_threads)
+        
+        self.quantile = quantile
+        
+        # Default alpha values for regularization
+        if alphas is None:
+            self.alphas = [0.0, 0.001, 0.01, 0.1, 1.0, 10.0]
+        else:
+            self.alphas = alphas
+            
+        # Default solvers to try
+        if solvers is None:
+            self.solvers = ['highs', 'interior-point']  # Most robust solvers
+        else:
+            self.solvers = solvers
+        
+        # Default QuantileRegressor parameters
+        self.default_params = {
+            'quantile': self.quantile,
+            'fit_intercept': True,
+            'solver_options': {'presolve': True}
+        }
+        
+        # Update with any provided parameters
+        self.default_params.update(qr_params)
+        
+    def train_single_model(self, X_train, y_train, X_val, y_val, **kwargs):
+        """
+        Train a single Quantile Regression model with hyperparameter optimization using validation set.
+        
+        Parameters:
+        X_train: Training features
+        y_train: Training targets
+        X_val: Validation features
+        y_val: Validation targets
+        **kwargs: Additional parameters (currently unused)
+        
+        Returns:
+        dict: Dictionary containing the trained model, scaler, imputer, and best parameters
+        """
+        # Handle missing values with median imputation
+        imputer = SimpleImputer(strategy='median')
+        X_train_imputed = imputer.fit_transform(X_train)
+        X_val_imputed = imputer.transform(X_val)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_imputed)
+        X_val_scaled = scaler.transform(X_val_imputed)
+        
+        best_params = None
+        best_score = float('inf')
+        best_model = None
+        
+        print(f"Testing {len(self.alphas) * len(self.solvers)} parameter combinations for quantile {self.quantile}...")
+        
+        # Grid search over alpha and solver
+        for alpha in self.alphas:
+            for solver in self.solvers:
+                try:
+                    current_params = self.default_params.copy()
+                    current_params['alpha'] = alpha
+                    current_params['solver'] = solver
+                    
+                    model = QuantileRegressor(**current_params)
+                    model.fit(X_train_scaled, y_train)
+                    
+                    val_pred = model.predict(X_val_scaled)
+                    # compute standard loss
+                    val_loss = mean_squared_error(y_val, val_pred)
+                    
+                    if val_loss < best_score:
+                        best_score = val_loss
+                        best_params = current_params.copy()
+                        best_model = model
+                        
+                    print(f"Alpha: {alpha}, Solver: {solver}, Pinball Loss: {val_loss:.4f}")
+                    
+                except Exception as e:
+                    print(f"Failed with alpha={alpha}, solver={solver}: {str(e)}")
+                    continue
+        
+        if best_model is None:
+            raise RuntimeError("No valid model found. All parameter combinations failed.")
+        
+        print(f"Best parameters: {best_params}")
+        print(f"Best validation pinball loss: {best_score:.4f}")
+        
+        return {
+            'model': best_model,
+            'scaler': scaler,
+            'imputer': imputer,
+            'best_params': best_params,
+            'best_score': best_score
+        }
+    
+    def predict(self, model_dict, X):
+        """
+        Make predictions using a trained Quantile Regression model.
+        
+        Parameters:
+        model_dict: Dictionary containing trained model, scaler, and imputer
+        X: Features to make predictions on
+        
+        Returns:
+        Array of predictions
+        """
+        model = model_dict['model']
+        scaler = model_dict['scaler']
+        imputer = model_dict['imputer']
+        
+        X_imputed = imputer.transform(X)
+        X_scaled = scaler.transform(X_imputed)
+        return model.predict(X_scaled)
+    
+    def _compute_top_features_by_shap(self, shap_values, feature_names):
+        # fill nans with 0
+        shap_values = shap_values.fillna(0)
+        mean_abs_shap = np.abs(shap_values).mean(axis=0)
+        feature_importance = pd.DataFrame({
+            "feature": feature_names,
+            "importance": mean_abs_shap
+        })
+        feature_importance = feature_importance.sort_values(
+            "importance", ascending=False
+        )
+        return feature_importance
+
+    def _compute_cv_shap_importance(
+        self,
+        models: list,  # List of 10 trained model dicts from CV
+        X_test_folds: list,  # List of test sets from each fold
+    ) -> Dict[str, Any]:
+        """
+        Compute aggregated SHAP feature importance across CV folds.
+        
+        Args:
+            models: List of trained model dictionaries from each CV fold
+            X_test_folds: List of test DataFrames from each fold
+            
+        Returns:
+            Dictionary with aggregated SHAP results
+        """
+        all_shap_values = []
+        all_test_data = []
+        
+        # Compute SHAP values for each fold
+        for i, (model_dict, X_test) in enumerate(zip(models, X_test_folds)):
+            model = model_dict['model']
+            scaler = model_dict['scaler']
+            imputer = model_dict['imputer']
+            
+            # Preprocess test data
+            X_test_imputed = imputer.transform(X_test)
+            X_test_scaled = scaler.transform(X_test_imputed)
+            
+            # Create SHAP explainer for linear model
+            explainer = shap.LinearExplainer(model, X_test_scaled)
+            shap_values = explainer.shap_values(X_test_scaled)
+            
+            shap_value_df = pd.DataFrame(shap_values, columns=X_test.columns)
+
+            all_shap_values.append(shap_value_df)
+            all_test_data.append(X_test)
+        
+        # Concatenate all SHAP values and test data
+        combined_shap_values = pd.concat(all_shap_values, axis=0)
+        combined_test_data = pd.concat(all_test_data, axis=0)
+        
+        # Compute feature importance using aggregated SHAP values
+        feature_importance = self._compute_top_features_by_shap(
+            combined_shap_values, 
+            combined_test_data.columns.tolist()
+        )
+        
+        return {
+            'combined_shap_values': combined_shap_values,
+            'combined_test_data': combined_test_data,
+            'feature_importance': feature_importance,
+            'feature_names': combined_test_data.columns.tolist()
+        }
+    
+    def compute_feature_importance(self):
+        """
+        Compute SHAP-based feature importance for Quantile Regression model.
+            
+        Returns:
+        Dictionary containing SHAP results and top features
+        """
+        feature_importance = self._compute_cv_shap_importance(
+            self.models,
+            self.all_test_X
+        )
+        return feature_importance
+        
+
+    def save_feature_importance(self):
+        """
+        Save SHAP analysis results to disk. To subdir feature_importance
+        """
+        # get and save the feature importance results
+        feature_importance = self.compute_feature_importance()
+        shap_values = feature_importance['combined_shap_values']
+        test_data = feature_importance['combined_test_data']
+        feature_importance = feature_importance['feature_importance']
+
+        # save to output directory
+        if not os.path.exists(os.path.join(self.output_dir, 'feature_importance')):
+            os.makedirs(os.path.join(self.output_dir, 'feature_importance'))
+        feature_importance.to_csv(os.path.join(self.output_dir, 'feature_importance', 'feature_importance.csv'), index=False)
+        shap_values.to_csv(os.path.join(self.output_dir, 'feature_importance', 'shap_values.csv'), index=False)
+        test_data.to_csv(os.path.join(self.output_dir, 'feature_importance', 'test_data.csv'), index=False)
+
+        # save shap summary plot
+        save_shap_summary_plot(shap_values, test_data, os.path.join(self.output_dir, 'feature_importance', 'shap_summary.png'))
+
+    def save_models(self):
+        """Save models, scalers, and imputers as pkl files to subdir models"""
         os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
         for i, model_dict in enumerate(self.models):
             with open(os.path.join(self.output_dir, 'models', f'model_{i}.pkl'), 'wb') as f:

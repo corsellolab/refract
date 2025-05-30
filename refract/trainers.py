@@ -13,6 +13,7 @@ from sklearn.linear_model import Lasso
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestRegressor
 
 from .utils import (
     load_feature_df, load_response_df, intersect_depmap_ids,
@@ -715,6 +716,236 @@ class LinearTrainer(BaseTrainer):
 
     def save_models(self):
         """Save models and scalers as pkl files to subdir models"""
+        os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
+        for i, model_dict in enumerate(self.models):
+            with open(os.path.join(self.output_dir, 'models', f'model_{i}.pkl'), 'wb') as f:
+                pickle.dump(model_dict, f)
+
+class RandomForestTrainer(BaseTrainer):
+    """
+    Random Forest trainer that implements the BaseTrainer interface.
+    
+    This class provides Random Forest implementations for training,
+    prediction, and feature importance analysis using SHAP values.
+    """
+    
+    def __init__(
+        self, 
+        output_dir: str, 
+        n_threads: int = 8,
+        param_grid: Dict[str, List] = None,
+        **rf_params
+    ):
+        """
+        Initialize the Random Forest trainer.
+        
+        Parameters:
+        output_dir (str): Directory to save results and models.
+        n_threads (int): Number of threads to use for training.
+        param_grid (Dict[str, List]): Parameter grid for grid search.
+        **rf_params: Additional Random Forest parameters to override defaults.
+        """
+        super().__init__(output_dir, n_threads)
+        
+        # Default parameter grid for grid search
+        if param_grid is None:
+            self.param_grid = {
+                'n_estimators': [100, 200, 500],
+                'max_depth': [10, 20, None],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4],
+                'max_features': ['sqrt', 'log2', None]
+            }
+        else:
+            self.param_grid = param_grid
+        
+        # Default Random Forest parameters
+        self.default_params = {
+            'random_state': 42,
+            'n_jobs': self.n_threads,
+            'bootstrap': True
+        }
+        
+        # Update with any provided parameters
+        self.default_params.update(rf_params)
+    
+    def train_single_model(self, X_train, y_train, X_val, y_val, **kwargs):
+        """
+        Train a single Random Forest model with grid search optimization using validation set.
+        
+        Parameters:
+        X_train: Training features
+        y_train: Training targets
+        X_val: Validation features
+        y_val: Validation targets
+        **kwargs: Additional parameters (currently unused)
+        
+        Returns:
+        dict: Dictionary containing the trained model and best parameters
+        """
+        # Handle missing values with median imputation
+        imputer = SimpleImputer(strategy='median')
+        X_train_imputed = imputer.fit_transform(X_train)
+        X_val_imputed = imputer.transform(X_val)
+        
+        best_params = None
+        best_score = float('inf')
+        best_model = None
+        
+        # Generate all parameter combinations
+        from itertools import product
+        param_names = list(self.param_grid.keys())
+        param_values = list(self.param_grid.values())
+        
+        print(f"Testing {len(list(product(*param_values)))} parameter combinations...")
+        
+        # Grid search over parameters
+        for i, param_combination in enumerate(product(*param_values)):
+            current_params = dict(zip(param_names, param_combination))
+            current_params.update(self.default_params)
+            
+            model = RandomForestRegressor(**current_params)
+            model.fit(X_train_imputed, y_train)
+            
+            val_pred = model.predict(X_val_imputed)
+            val_rmse = np.sqrt(mean_squared_error(y_val, val_pred))
+            
+            if val_rmse < best_score:
+                best_score = val_rmse
+                best_params = current_params.copy()
+                best_model = model
+                
+            if (i + 1) % 10 == 0:
+                print(f"Completed {i + 1} parameter combinations, best RMSE so far: {best_score:.4f}")
+        
+        print(f"Best parameters: {best_params}")
+        print(f"Best validation RMSE: {best_score:.4f}")
+        
+        return {
+            'model': best_model,
+            'imputer': imputer,
+            'best_params': best_params,
+            'best_score': best_score
+        }
+    
+    def predict(self, model_dict, X):
+        """
+        Make predictions using a trained Random Forest model.
+        
+        Parameters:
+        model_dict: Dictionary containing trained model and imputer
+        X: Features to make predictions on
+        
+        Returns:
+        Array of predictions
+        """
+        model = model_dict['model']
+        imputer = model_dict['imputer']
+        
+        X_imputed = imputer.transform(X)
+        return model.predict(X_imputed)
+    
+    def _compute_top_features_by_shap(self, shap_values, feature_names):
+        # fill nans with 0
+        shap_values = shap_values.fillna(0)
+        mean_abs_shap = np.abs(shap_values).mean(axis=0)
+        feature_importance = pd.DataFrame({
+            "feature": feature_names,
+            "importance": mean_abs_shap
+        })
+        feature_importance = feature_importance.sort_values(
+            "importance", ascending=False
+        )
+        return feature_importance
+
+    def _compute_cv_shap_importance(
+        self,
+        models: list,  # List of 10 trained model dicts from CV
+        X_test_folds: list,  # List of test sets from each fold
+    ) -> Dict[str, Any]:
+        """
+        Compute aggregated SHAP feature importance across CV folds.
+        
+        Args:
+            models: List of trained model dictionaries from each CV fold
+            X_test_folds: List of test DataFrames from each fold
+            
+        Returns:
+            Dictionary with aggregated SHAP results
+        """
+        all_shap_values = []
+        all_test_data = []
+        
+        # Compute SHAP values for each fold
+        for i, (model_dict, X_test) in enumerate(zip(models, X_test_folds)):
+            model = model_dict['model']
+            imputer = model_dict['imputer']
+            
+            # Handle missing values with median imputation
+            X_test_imputed = imputer.transform(X_test)
+            
+            # Create SHAP explainer for tree model
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_test_imputed)
+            
+            shap_value_df = pd.DataFrame(shap_values, columns=X_test.columns)
+
+            all_shap_values.append(shap_value_df)
+            all_test_data.append(X_test)
+        
+        # Concatenate all SHAP values and test data
+        combined_shap_values = pd.concat(all_shap_values, axis=0)
+        combined_test_data = pd.concat(all_test_data, axis=0)
+        
+        # Compute feature importance using aggregated SHAP values
+        feature_importance = self._compute_top_features_by_shap(
+            combined_shap_values, 
+            combined_test_data.columns.tolist()
+        )
+        
+        return {
+            'combined_shap_values': combined_shap_values,
+            'combined_test_data': combined_test_data,
+            'feature_importance': feature_importance,
+            'feature_names': combined_test_data.columns.tolist()
+        }
+    
+    def compute_feature_importance(self):
+        """
+        Compute SHAP-based feature importance for Random Forest model.
+            
+        Returns:
+        Dictionary containing SHAP results and top features
+        """
+        feature_importance = self._compute_cv_shap_importance(
+            self.models,
+            self.all_test_X
+        )
+        return feature_importance
+        
+
+    def save_feature_importance(self):
+        """
+        Save SHAP analysis results to disk. To subdir feature_importance
+        """
+        # get and save the feature importance results
+        feature_importance = self.compute_feature_importance()
+        shap_values = feature_importance['combined_shap_values']
+        test_data = feature_importance['combined_test_data']
+        feature_importance = feature_importance['feature_importance']
+
+        # save to output directory
+        if not os.path.exists(os.path.join(self.output_dir, 'feature_importance')):
+            os.makedirs(os.path.join(self.output_dir, 'feature_importance'))
+        feature_importance.to_csv(os.path.join(self.output_dir, 'feature_importance', 'feature_importance.csv'), index=False)
+        shap_values.to_csv(os.path.join(self.output_dir, 'feature_importance', 'shap_values.csv'), index=False)
+        test_data.to_csv(os.path.join(self.output_dir, 'feature_importance', 'test_data.csv'), index=False)
+
+        # save shap summary plot
+        save_shap_summary_plot(shap_values, test_data, os.path.join(self.output_dir, 'feature_importance', 'shap_summary.png'))
+
+    def save_models(self):
+        """Save models and imputers as pkl files to subdir models"""
         os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
         for i, model_dict in enumerate(self.models):
             with open(os.path.join(self.output_dir, 'models', f'model_{i}.pkl'), 'wb') as f:

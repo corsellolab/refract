@@ -22,10 +22,10 @@ process TRAIN_RANDOM_FOREST_MODEL {
         --output_dir random_forest \
         --n_threads ${params.n_threads} \
         --n_splits ${params.n_splits ?: 10} \
-        --n_estimators "${params.n_estimators ?: '100,200,500'}" \
-        --max_depth "${params.max_depth ?: '10,20,None'}" \
-        --min_samples_split "${params.min_samples_split ?: '2,5,10'}" \
-        --min_samples_leaf "${params.min_samples_leaf ?: '1,2,4'}" \
-        --max_features "${params.max_features ?: 'sqrt,log2,None'}"
+        --n_estimators "${params.n_estimators ?: '100'}" \
+        --max_depth "${params.max_depth ?: 'None'}" \
+        --min_samples_split "${params.min_samples_split ?: '2'}" \
+        --min_samples_leaf "${params.min_samples_leaf ?: '1'}" \
+        --max_features "${params.max_features ?: '1.0'}"
     """
 } 

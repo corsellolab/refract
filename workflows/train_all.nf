@@ -1,6 +1,7 @@
 #!/usr/bin/env nextflow 
 
-include { SELECT_TOP_FEATURES } from "../modules/split_data.nf"
+include { SPLIT_DATA } from "../modules/split_data.nf"
+include { TRAIN_XGBOOST_MODEL } from "../modules/train_xgboost_model.nf"
 
 workflow train_all {
     take:
@@ -9,5 +10,8 @@ workflow train_all {
 
     main:
     // run split data
-    SELECT_TOP_FEATURES(response_ch, feature_path)
+    SPLIT_DATA(response_ch, feature_path)
+
+    // train xgboost model
+    TRAIN_XGBOOST_MODEL(response_ch, feature_path, SPLIT_DATA.out.data_split)
 }

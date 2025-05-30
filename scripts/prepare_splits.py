@@ -14,23 +14,10 @@ from refract.feature_selection import get_pearson_correlations, get_top_n_featur
 from refract.data_split import get_data_splits, get_data_for_split
 from refract.utils import load_feature_df, load_response_df, intersect_depmap_ids
 
-def process_split(split_idx, response_df, feature_df, splits, args):
+def process_split(split_idx, train_response, val_response, test_response, train_features, args):
     """Process a single split"""
-    # Get train/test data for this split
-    train_response, test_response, train_features, _ = get_data_for_split(
-        response_df, feature_df, splits, split_idx
-    )
-    
-    # Further split training data into train and validation sets
-    train_response_final, val_response, train_features_final, val_features = train_test_split(
-        train_response, 
-        train_features,
-        train_size=args.train_val_split,
-        random_state=42 + split_idx  # Different seed for each fold
-    )
-    
     # Get correlations using only the final training data
-    corr_df = get_pearson_correlations(train_response_final, train_features_final)
+    corr_df = get_pearson_correlations(train_response, train_features)
     
     # Select top features
     selected_features = get_top_n_features(corr_df, args.n_features)
@@ -39,7 +26,7 @@ def process_split(split_idx, response_df, feature_df, splits, args):
     split_file = os.path.join(args.output_dir, f'{split_idx}.split.txt')
     with open(split_file, 'w') as f:
         f.write('depmap_id,split\n')
-        for idx in train_response_final.index:
+        for idx in train_response.index:
             f.write(f'{idx},train\n')
         for idx in val_response.index:
             f.write(f'{idx},val\n')
@@ -82,16 +69,32 @@ def main():
     splits = get_data_splits(response_df, n_splits=args.n_splits)
     
     # Process splits in parallel
+    # Create a list of all split data upfront
+    split_data = []
+    for split_idx in range(len(splits)):
+        train_response, test_response, train_features, _ = get_data_for_split(
+            response_df, feature_df, splits, split_idx
+        )
+        train_response_final, val_response, train_features_final, val_features = train_test_split(
+            train_response, 
+            train_features,
+            train_size=args.train_val_split,
+            random_state=42 + split_idx
+        )
+        split_data.append((split_idx, train_response_final, val_response, test_response, train_features_final))
+
+    # Process all splits in parallel using map
     with ThreadPoolExecutor(max_workers=args.n_jobs) as executor:
-        futures = []
-        for split_idx in range(len(splits)):
-            future = executor.submit(process_split, split_idx, response_df, feature_df, splits, args)
-            futures.append(future)
-        
-        # Wait for all splits to complete
-        for future in futures:
-            split_idx = future.result()
-            print(f"Completed split {split_idx}")
+        results = list(
+            executor.map(
+                lambda x: process_split(*x, args),
+                split_data
+            ) 
+        )
+    
+    # Print completion messages
+    for split_idx in results:
+        print(f"Completed split {split_idx}")
 
 if __name__ == "__main__":
     main()

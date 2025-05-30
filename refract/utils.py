@@ -28,9 +28,13 @@ def load_response_df(response_path):
     return response_df
 
 def intersect_depmap_ids(response_df, feature_df):
+    response_df = response_df.copy()
     # Add debug prints
     print(f"Initial response_df shape: {response_df.shape}")
     print(f"Initial feature_df shape: {feature_df.shape}")
+
+    # drop where LFC is NaN in response_df
+    response_df = response_df.dropna(subset=['LFC'])
     
     depmap_ids = set(response_df.index.values)
     feature_depmap_ids = set(feature_df.index.values)

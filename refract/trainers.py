@@ -259,6 +259,14 @@ class BaseTrainer(ABC):
         with open(os.path.join(self.output_dir, 'trainer.pkl'), 'wb') as f:
             pickle.dump(self, f)
 
+         # save response file to output directory
+        response_df = load_response_df(self.response_file)
+        response_df.to_csv(os.path.join(self.output_dir, 'response_file.csv'), index=False)
+
+        # save path to the feature file
+        with open(os.path.join(self.output_dir, 'path_to_feature_file.txt'), 'w') as f:
+            f.write(self.feature_file)
+
 
 class XGBoostTrainer(BaseTrainer):
     """

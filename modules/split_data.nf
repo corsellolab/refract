@@ -1,4 +1,4 @@
-process SELECT_TOP_FEATURES {
+process SPLIT_DATA {
     //publishDir "${params.output_dir}", pattern: "${params.data_split_dir}"
     publishDir "${params.output_dir}/${response_name}", mode: 'copy', pattern: "${params.data_split_dir}"
     conda params.conda_env
@@ -13,7 +13,7 @@ process SELECT_TOP_FEATURES {
 
     script:
     """
-    python ${params.pipeline_script_dir}/select_features.py \
+    python ${params.pipeline_script_dir}/prepare_splits.py \
         --feature_file ${feature_path} \
         --response_file ${response_file} \
         --output_dir ${params.data_split_dir} \

@@ -1,76 +1,472 @@
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from glob import glob
+import shap
 from shap import TreeExplainer, summary_plot
 import xgboost as xgb
+import pickle
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Tuple, List, Optional
 
+from .utils import (
+    load_feature_df, load_response_df, intersect_depmap_ids,
+    load_split, load_selected_features, evaluate_predictions
+)
+from .visualize import save_shap_summary_plot, save_prediction_scatter
 
-def train_xgboost_with_early_stopping(
-        X_train, y_train, X_val, y_val, num_rounds=1000, early_stopping_rounds=50, n_threads=8
-):
+class BaseTrainer(ABC):
     """
-    Trains an XGBoost regression model with early stopping and outlier emphasis in the loss function.
-
-    Parameters:
-    X_train (pd.DataFrame or np.ndarray): Training features.
-    y_train (pd.Series or np.ndarray): Training target values.
-    X_val (pd.DataFrame or np.ndarray): Validation features.
-    num_rounds (int): Maximum number of training rounds.
-    early_stopping_rounds (int): Number of rounds without improvement to trigger early stopping.
-    n_threads (int): Number of CPU threads to use.
-
-    Returns:
-    xgb.Booster: The trained XGBoost model.
+    Base trainer class that defines the interface for all model trainers.
+    
+    This class provides a common structure for training machine learning models
+    with cross-validation, feature importance analysis, and prediction capabilities.
     """
-    # Compute mean_label once
-    mean_label = np.mean(y_train)
-
-    # compute weights 
-    weights = 1 + np.abs(y_train - mean_label)
-
-    # convert data to XGBoost DMatrix format with precomputed weights
-    dtrain = xgb.DMatrix(X_train, label=y_train, weight=weights)
-    dval = xgb.DMatrix(X_val, label=y_val)
-
-    # define parameters for the XGBoost model
-    params = {
-        'objective': 'reg:squarederror',  # Standard regression loss
-        'eval_metric': 'rmse',            # Root mean squared error for evaluation
-        'eta': 0.01,                      # Learning rate
-        'max_depth': 6,                   # Tree depth
-        'subsample': 0.8,                 # Row subsampling
-        'colsample_bytree': 0.8,          # Feature subsampling
-        'lambda': 1.0,                    # L2 regularization term
-        'alpha': 0.1,                     # L1 regularization term
-        'tree_method': 'hist',            # Use the faster histogram-based algorithm
-        'nthread': n_threads              # Number of threads (adjust to your available cores)
-    }
-
-    # Define the custom loss function without redundant calculations
-    def weighted_mse_with_outlier_emphasis(preds, dtrain):
-        labels = dtrain.get_label()
-        errors = preds - labels
-
-        # Retrieve precomputed weights
-        weights = dtrain.get_weight()
-
-        grad = weights * errors          # Weighted gradient
-        hess = weights                   # Weighted Hessian
-
-        return grad, hess
+    
+    def __init__(self, output_dir: str, n_threads: int = 8):
+        """
+        Initialize the base trainer.
         
-    watchlist = [(dtrain, "train"), (dval, "eval")]
+        Parameters:
+        output_dir (str): Directory to save results and models.
+        n_threads (int): Number of threads to use for training.
+        """
+        self.output_dir = output_dir
+        self.n_threads = n_threads
+        self.models = []  # Store trained models for each fold
+        self.all_test_X = [] # Store test data for each fold
+        self.fold_results = []  # Store performance metrics for each fold
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(self.output_dir, exist_ok=True)
+    
+    @abstractmethod
+    def train_single_model(self, X_train, y_train, X_val, y_val, **kwargs):
+        """
+        Train a single model on the given training data.
+        
+        Parameters:
+        X_train: Training features
+        y_train: Training targets
+        X_val: Validation features
+        y_val: Validation targets
+        **kwargs: Additional model-specific parameters
+        
+        Returns:
+        Trained model object
+        """
+        pass
+    
+    @abstractmethod
+    def predict(self, model, X):
+        """
+        Make predictions using a trained model.
+        
+        Parameters:
+        model: Trained model object
+        X: Features to make predictions on
+        
+        Returns:
+        Array of predictions
+        """
+        pass
 
-    model = xgb.train(
-        params=params,
-        dtrain=dtrain,
-        num_boost_round=num_rounds,
-        evals=watchlist,
-        early_stopping_rounds=early_stopping_rounds,
-        obj=weighted_mse_with_outlier_emphasis,
-        verbose_eval=True
-    )
+    def train_cross_validation(
+        self, 
+        feature_file: str, 
+        response_file: str, 
+        split_dir: str,
+        n_splits: int = 10,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Train models using cross-validation.
+        
+        Parameters:
+        feature_file (str): Path to feature file
+        response_file (str): Path to response file
+        split_dir (str): Directory containing split files
+        n_splits (int): Number of cross-validation splits
+        **kwargs: Additional model-specific parameters
+        
+        Returns:
+        Dictionary containing training results and metrics
+        """
+        # Load and preprocess data
+        feature_df = load_feature_df(feature_file)
+        response_df = load_response_df(response_file)
+        response_df, feature_df = intersect_depmap_ids(response_df, feature_df)
+        
+        # Store all predictions for overall metrics
+        all_val_true = []
+        all_val_pred = []
+        all_test_true = []
+        all_test_pred = []
+        all_test_ids = []
+        
+        # Train models for each fold
+        for fold in range(n_splits):
+            print(f"\nProcessing fold {fold}")
+            
+            # Load split assignments and selected features
+            split_file = os.path.join(split_dir, f'{fold}.split.txt')
+            features_file = os.path.join(split_dir, f'{fold}.features.csv')
+            
+            train_ids, val_ids, test_ids = load_split(split_file)
+            selected_features = load_selected_features(features_file)
+            
+            # Select relevant features and samples
+            X = feature_df[selected_features]
+            y = response_df['LFC']
+            
+            # Split data according to fold assignments
+            X_train = X.loc[train_ids]
+            y_train = y.loc[train_ids]
+            X_val = X.loc[val_ids]
+            y_val = y.loc[val_ids]
+            X_test = X.loc[test_ids]
+            y_test = y.loc[test_ids]
+            
+            # Train model
+            model = self.train_single_model(X_train, y_train, X_val, y_val, **kwargs)
+            self.models.append(model)
+            self.all_test_X.append(X_test)
+            
+            # Make predictions
+            val_preds = self.predict(model, X_val)
+            test_preds = self.predict(model, X_test)
+            
+            # Evaluate performance
+            print(f"\nFold {fold} Results:")
+            val_metrics = evaluate_predictions(y_val, val_preds, "Validation")
+            test_metrics = evaluate_predictions(y_test, test_preds, "Test")
+            
+            # Store predictions for overall metrics
+            all_val_true.extend(y_val)
+            all_val_pred.extend(val_preds)
+            all_test_true.extend(y_test)
+            all_test_pred.extend(test_preds)
+            all_test_ids.extend(test_ids)
+            
+            # Store results
+            self.fold_results.append({
+                'fold': fold,
+                'val_rmse': val_metrics['rmse'],
+                'val_r2': val_metrics['r2'],
+                'val_pearson': val_metrics['pearson'],
+                'test_rmse': test_metrics['rmse'],
+                'test_r2': test_metrics['r2'],
+                'test_pearson': test_metrics['pearson'],
+            })
+        
+        # Calculate overall metrics
+        print("\nOverall Results (across all folds):")
+        overall_val_metrics = evaluate_predictions(
+            np.array(all_val_true), 
+            np.array(all_val_pred), 
+            "Overall Validation"
+        )
+        overall_test_metrics = evaluate_predictions(
+            np.array(all_test_true), 
+            np.array(all_test_pred), 
+            "Overall Test"
+        )
 
-    print(f"Best iteration: {model.best_iteration}")
-    return model
+        # Add overall results to the fold_results
+        overall_results = {
+            'fold': 'overall',
+            'val_rmse': overall_val_metrics['rmse'],
+            'val_r2': overall_val_metrics['r2'],
+            'val_pearson': overall_val_metrics['pearson'],
+            'test_rmse': overall_test_metrics['rmse'],
+            'test_r2': overall_test_metrics['r2'],
+            'test_pearson': overall_test_metrics['pearson']
+        }
+        self.fold_results.append(overall_results)
+        
+        # Save and print summary
+        self.save_summary_results()
+        self.print_summary_statistics()
+        self.save_all_test_predictions(all_test_ids, all_test_true, all_test_pred)
+        self.save_trainer()
+        save_prediction_scatter(all_test_pred, all_test_true, os.path.join(self.output_dir, 'predictions_scatter.png'))
+        
+        return {
+            'models': self.models,
+            'fold_results': self.fold_results,
+            'overall_val_metrics': overall_val_metrics,
+            'overall_test_metrics': overall_test_metrics,
+            'all_test_ids': all_test_ids,
+            'all_test_true': all_test_true,
+            'all_test_pred': all_test_pred
+        }
+    
+    def save_summary_results(self):
+        """Save summary statistics to CSV file."""
+        results_df = pd.DataFrame(self.fold_results)
+        results_df.to_csv(os.path.join(self.output_dir, 'model_performance_summary.csv'), index=False)
+
+    def save_all_test_predictions(self, all_test_ids, all_test_true, all_test_pred):
+        """Save all test predictions to CSV file."""
+        results_df = pd.DataFrame({
+            'id': all_test_ids,
+            'true': all_test_true,
+            'pred': all_test_pred
+        })
+        results_df.to_csv(os.path.join(self.output_dir, 'all_test_predictions.csv'), index=False)
+    
+    def print_summary_statistics(self):
+        """Print summary statistics across all folds."""
+        results_df = pd.DataFrame(self.fold_results[:-1])  # Exclude overall results for mean/std calculation
+        
+        print("\nPer-fold Summary Statistics:")
+        print("\nValidation Metrics:")
+        print(f"Mean RMSE: {results_df['val_rmse'].mean():.4f} ± {results_df['val_rmse'].std():.4f}")
+        print(f"Mean R2: {results_df['val_r2'].mean():.4f} ± {results_df['val_r2'].std():.4f}")
+        print(f"Mean Pearson: {results_df['val_pearson'].mean():.4f} ± {results_df['val_pearson'].std():.4f}")
+        print("\nTest Metrics:")
+        print(f"Mean RMSE: {results_df['test_rmse'].mean():.4f} ± {results_df['test_rmse'].std():.4f}")
+        print(f"Mean R2: {results_df['test_r2'].mean():.4f} ± {results_df['test_r2'].std():.4f}")
+        print(f"Mean Pearson: {results_df['test_pearson'].mean():.4f} ± {results_df['test_pearson'].std():.4f}")
+
+    def save_models(self):
+        """Save as pkl file to subdir models"""
+        os.makedirs(os.path.join(self.output_dir, 'models'), exist_ok=True)
+        for i, model in enumerate(self.models):
+            with open(os.path.join(self.output_dir, 'models', f'model_{i}.pkl'), 'wb') as f:
+                pickle.dump(model, f)
+
+    @abstractmethod
+    def compute_feature_importance(self):
+        """
+        Compute feature importance scores for the model.
+        
+        Returns:
+        Dictionary containing importance results
+        """
+        pass
+
+    @abstractmethod
+    def save_feature_importance(self):
+        """
+        Save feature importance results for a specific fold.
+        """
+        pass
+
+    def save_trainer(self):
+        """Save the trainer object to a pkl file"""
+        with open(os.path.join(self.output_dir, 'trainer.pkl'), 'wb') as f:
+            pickle.dump(self, f)
+
+
+class XGBoostTrainer(BaseTrainer):
+    """
+    XGBoost trainer that implements the BaseTrainer interface.
+    
+    This class provides XGBoost-specific implementations for training,
+    prediction, and feature importance analysis using SHAP values.
+    """
+    
+    def __init__(
+        self, 
+        output_dir: str, 
+        n_threads: int = 8,
+        num_rounds: int = 1000,
+        early_stopping_rounds: int = 50,
+        **xgb_params
+    ):
+        """
+        Initialize the XGBoost trainer.
+        
+        Parameters:
+        output_dir (str): Directory to save results and models.
+        n_threads (int): Number of threads to use for training.
+        num_rounds (int): Maximum number of training rounds.
+        early_stopping_rounds (int): Number of rounds without improvement to trigger early stopping.
+        **xgb_params: Additional XGBoost parameters to override defaults.
+        """
+        super().__init__(output_dir, n_threads)
+        self.num_rounds = num_rounds
+        self.early_stopping_rounds = early_stopping_rounds
+        
+        # Default XGBoost parameters
+        self.default_params = {
+            'objective': 'reg:squarederror',
+            'eval_metric': 'rmse',
+            'eta': 0.01,
+            'max_depth': 6,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
+            'lambda': 1.0,
+            'alpha': 0.1,
+            'tree_method': 'hist',
+            'nthread': self.n_threads
+        }
+        
+        # Update with any provided parameters
+        self.default_params.update(xgb_params)
+    
+    def train_single_model(self, X_train, y_train, X_val, y_val, **kwargs):
+        """
+        Train a single XGBoost model with early stopping and outlier emphasis.
+        
+        Parameters:
+        X_train: Training features
+        y_train: Training targets
+        X_val: Validation features
+        y_val: Validation targets
+        **kwargs: Additional parameters (currently unused)
+        
+        Returns:
+        xgb.Booster: The trained XGBoost model
+        """
+        # Compute mean_label once
+        mean_label = np.mean(y_train)
+        
+        # Compute weights for outlier emphasis
+        weights = 1 + np.abs(y_train - mean_label)
+        
+        # Convert data to XGBoost DMatrix format with precomputed weights
+        dtrain = xgb.DMatrix(X_train, label=y_train, weight=weights)
+        dval = xgb.DMatrix(X_val, label=y_val)
+        
+        # Define the custom loss function
+        def weighted_mse_with_outlier_emphasis(preds, dtrain):
+            labels = dtrain.get_label()
+            errors = preds - labels
+            
+            # Retrieve precomputed weights
+            weights = dtrain.get_weight()
+            
+            grad = weights * errors  # Weighted gradient
+            hess = weights           # Weighted Hessian
+            
+            return grad, hess
+        
+        watchlist = [(dtrain, "train"), (dval, "eval")]
+        
+        model = xgb.train(
+            params=self.default_params,
+            dtrain=dtrain,
+            num_boost_round=self.num_rounds,
+            evals=watchlist,
+            early_stopping_rounds=self.early_stopping_rounds,
+            obj=weighted_mse_with_outlier_emphasis,
+            verbose_eval=True
+        )
+        
+        print(f"Best iteration: {model.best_iteration}")
+        return model
+    
+    def predict(self, model, X):
+        """
+        Make predictions using a trained XGBoost model.
+        
+        Parameters:
+        model: Trained XGBoost model
+        X: Features to make predictions on
+        
+        Returns:
+        Array of predictions
+        """
+        dmatrix = xgb.DMatrix(X)
+        return model.predict(dmatrix)
+    
+    def _compute_top_features_by_shap(self, shap_values, feature_names):
+        # fill nans with 0
+        shap_values = shap_values.fillna(0)
+        mean_abs_shap = np.abs(shap_values).mean(axis=0)
+        feature_importance = pd.DataFrame({
+            "feature": feature_names,
+            "importance": mean_abs_shap
+        })
+        feature_importance = feature_importance.sort_values(
+            "importance", ascending=False
+        )
+        return feature_importance
+
+    def _compute_cv_shap_importance(
+        self,
+        models: list,  # List of 10 trained models from CV
+        X_test_folds: list,  # List of test sets from each fold
+    ) -> Dict[str, Any]:
+        """
+        Compute aggregated SHAP feature importance across CV folds.
+        
+        Args:
+            models: List of trained XGBoost models from each CV fold
+            X_test_folds: List of test DataFrames from each fold
+            
+        Returns:
+            Dictionary with aggregated SHAP results
+        """
+        all_shap_values = []
+        all_test_data = []
+        
+        # Compute SHAP values for each fold
+        for i, (model, X_test) in enumerate(zip(models, X_test_folds)):
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_test)
+            
+            shap_value_df = pd.DataFrame(shap_values, columns=X_test.columns)
+
+            all_shap_values.append(shap_value_df)
+            all_test_data.append(X_test)
+        
+        # Concatenate all SHAP values and test data
+        combined_shap_values = pd.concat(all_shap_values, axis=0)
+        combined_test_data = pd.concat(all_test_data, axis=0)
+        
+        # Compute feature importance using aggregated SHAP values
+        feature_importance = self._compute_top_features_by_shap(
+            combined_shap_values, 
+            combined_test_data.columns.tolist()
+        )
+        
+        return {
+            'combined_shap_values': combined_shap_values,
+            'combined_test_data': combined_test_data,
+            'feature_importance': feature_importance,
+            'feature_names': combined_test_data.columns.tolist()
+        }
+    
+    def compute_feature_importance(self):
+        """
+        Compute SHAP-based feature importance for XGBoost model.
+            
+        Returns:
+        Dictionary containing SHAP results and top features
+        """
+        feature_importance = self._compute_cv_shap_importance(
+            self.models,
+            self.all_test_X
+        )
+        return feature_importance
+        
+
+    def save_feature_importance(self):
+        """
+        Save SHAP analysis results to disk. To subdir feature_importance
+        
+        Parameters:
+        fold (int): Fold number
+        importance_results (Dict): Results from compute_feature_importance
+        """
+        # get and save the feature importance results
+        feature_importance = self.compute_feature_importance()
+        shap_values = feature_importance['combined_shap_values']
+        test_data = feature_importance['combined_test_data']
+        feature_importance = feature_importance['feature_importance']
+
+        # save to output directory
+        if not os.path.exists(os.path.join(self.output_dir, 'feature_importance')):
+            os.makedirs(os.path.join(self.output_dir, 'feature_importance'))
+        feature_importance.to_csv(os.path.join(self.output_dir, 'feature_importance', 'feature_importance.csv'), index=False)
+        shap_values.to_csv(os.path.join(self.output_dir, 'feature_importance', 'shap_values.csv'), index=False)
+        test_data.to_csv(os.path.join(self.output_dir, 'feature_importance', 'test_data.csv'), index=False)
+
+        # save shap summary plot
+        save_shap_summary_plot(shap_values, test_data, os.path.join(self.output_dir, 'feature_importance', 'shap_summary.png'))
+
+

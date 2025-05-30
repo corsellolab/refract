@@ -1,22 +1,25 @@
-process SELECT_FEATURES_REFRACT {
-    publishDir params.data_split_dir, mode: 'copy', pattern: "${response_name}"
+process SELECT_TOP_FEATURES {
+    //publishDir "${params.output_dir}", pattern: "${params.data_split_dir}"
+    publishDir "${params.output_dir}/${response_name}", mode: 'copy', pattern: "${params.data_split_dir}"
+    conda params.conda_env
 
     input:
     tuple val(response_name), path(response_file)
     path(feature_path)
 
     output:
-    tuple val(response_name), path(response_file), path(feature_path), path("${response_name}")
+    tuple val(response_name), path(response_file), path(feature_path)
+    path "${params.data_split_dir}", emit: "data_split"
 
-    script:    
+    script:
     """
-    mkdir -p ${response_name}
     python ${params.pipeline_script_dir}/select_features.py \
         --feature_file ${feature_path} \
         --response_file ${response_file} \
-        --output_dir ${response_name} \
+        --output_dir ${params.data_split_dir} \
         --n_splits ${params.n_splits} \
-        --feature_fraction ${params.feature_fraction} \
-        --train_val_split ${params.train_val_split}
+        --n_features ${params.n_features} \
+        --train_val_split ${params.train_val_split} \
+        --n_jobs ${params.n_splits}
     """
 }

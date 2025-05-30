@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error, r2_score
 from glob import glob
 
 def load_feature_df(feature_path):
@@ -50,3 +51,27 @@ def intersect_depmap_ids(response_df, feature_df):
     print(f"Final feature_df shape: {feature_df.shape}")
     
     return response_df, feature_df
+
+def load_split(split_file):
+    """Load train/val/test split assignments from a split file."""
+    split_df = pd.read_csv(split_file)
+    train_ids = split_df[split_df['split'] == 'train']['depmap_id'].values
+    val_ids = split_df[split_df['split'] == 'val']['depmap_id'].values
+    test_ids = split_df[split_df['split'] == 'test']['depmap_id'].values
+    return train_ids, val_ids, test_ids
+
+def load_selected_features(features_file):
+    """Load selected features from features file."""
+    features_df = pd.read_csv(features_file)
+    return features_df['feature_name'].values
+
+def evaluate_predictions(y_true, y_pred, set_name):
+    """Calculate and print evaluation metrics."""
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_true, y_pred)
+    pearson = np.corrcoef(y_true, y_pred)[0,1]
+    print(f"{set_name} RMSE: {rmse:.4f}")
+    print(f"{set_name} R2: {r2:.4f}")
+    print(f"{set_name} Pearson: {pearson:.4f}")
+    return {'rmse': rmse, 'r2': r2, 'pearson': pearson}

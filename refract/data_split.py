@@ -6,6 +6,9 @@ from sklearn.model_selection import StratifiedKFold
 
 
 def get_data_splits(response_df, n_splits=5):
+    """
+    Get the data splits for the response dataframe.
+    """
     # Add input validation
     if response_df.empty:
         raise ValueError("Response DataFrame is empty")
@@ -31,6 +34,9 @@ def get_data_splits(response_df, n_splits=5):
     return splits
 
 def get_data_for_split(response_df, feature_df, data_splits, split_index):
+    """
+    Get the data for a given split.
+    """
     train_index, test_index = data_splits[split_index]
     train_response_df = response_df.loc[train_index]
     test_response_df = response_df.loc[test_index]

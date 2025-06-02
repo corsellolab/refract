@@ -18,9 +18,15 @@ def load_feature_df(feature_path):
 def load_response_df(response_path):
     response_df = pd.read_csv(response_path)
     # drop where depmap_id, LFC, name, or dose is missing
-    response_df = response_df.dropna(subset=['depmap_id', 'LFC', 'name', 'dose'])
+    if "dose" in response_df.columns:
+        response_df = response_df.dropna(subset=['depmap_id', 'LFC', 'name', 'dose'])
+    else:
+        response_df = response_df.dropna(subset=['depmap_id', 'LFC', 'name'])
     # drop duplicates of depmap_id, name, and dose
-    response_df = response_df.drop_duplicates(subset=['depmap_id', 'name', 'dose'])
+    if "dose" in response_df.columns:
+        response_df = response_df.drop_duplicates(subset=['depmap_id', 'name', 'dose'])
+    else:
+        response_df = response_df.drop_duplicates(subset=['depmap_id', 'name'])
     # compute decile of LFC
     response_df["decile"] = pd.qcut(response_df.LFC, 10, labels=False)
     # set depmap_id as index

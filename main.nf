@@ -7,7 +7,7 @@ nextflow.enable.dsl = 2
 include { train_all } from './workflows/train_all'
 
 // Default parameters
-params.dev = true
+params.dev = false
 params.script_dir = "${projectDir}/scripts"
 params.seed = 42
 params.n_threads = 8

@@ -6,12 +6,12 @@ import sys
 refract_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(refract_path)
 
-from refract.trainers import XGBoostTrainer
+from refract.trainers import QuantileRegressionTrainer
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train XGBoost model using cross-validation"
+        description="Train Quantile Regression model using cross-validation"
     )
     parser.add_argument(
         "--feature_file", type=str, required=True, help="Path to feature file"
@@ -26,53 +26,50 @@ def main():
         "--output_dir", type=str, required=True, help="Directory to save results"
     )
     parser.add_argument(
-        "--n_threads", type=int, default=8, help="Number of threads for XGBoost"
-    )
-    parser.add_argument(
-        "--num_rounds", type=int, default=1000, help="Maximum number of training rounds"
-    )
-    parser.add_argument(
-        "--early_stopping_rounds", type=int, default=50, help="Early stopping rounds"
+        "--n_threads",
+        type=int,
+        default=8,
+        help="Number of threads (not used for quantile regression)",
     )
     parser.add_argument(
         "--n_splits", type=int, default=10, help="Number of cross-validation splits"
     )
 
-    # XGBoost hyperparameters
-    parser.add_argument("--eta", type=float, default=0.01, help="Learning rate")
-    parser.add_argument("--max_depth", type=int, default=6, help="Maximum tree depth")
+    # Quantile regression hyperparameters
     parser.add_argument(
-        "--subsample", type=float, default=0.8, help="Row subsampling ratio"
+        "--quantile",
+        type=float,
+        default=0.1,
+        help="Quantile to estimate (default: 0.1 for bottom 10%)",
     )
     parser.add_argument(
-        "--colsample_bytree", type=float, default=0.8, help="Feature subsampling ratio"
+        "--alphas",
+        type=str,
+        default="0.0,0.001,0.01,0.1,1.0,10.0",
+        help="Comma-separated alpha values for regularization",
     )
     parser.add_argument(
-        "--lambda_reg", type=float, default=1.0, help="L2 regularization"
-    )
-    parser.add_argument(
-        "--alpha_reg", type=float, default=0.1, help="L1 regularization"
+        "--solvers",
+        type=str,
+        default="highs,interior-point",
+        help="Comma-separated solver names to try",
     )
 
     args = parser.parse_args()
 
-    # Prepare XGBoost parameters
-    xgb_params = {
-        "eta": args.eta,
-        "max_depth": args.max_depth,
-        "subsample": args.subsample,
-        "colsample_bytree": args.colsample_bytree,
-        "lambda": args.lambda_reg,
-        "alpha": args.alpha_reg,
-    }
+    # Parse alpha values
+    alphas = [float(alpha.strip()) for alpha in args.alphas.split(",")]
+
+    # Parse solvers
+    solvers = [solver.strip() for solver in args.solvers.split(",")]
 
     # Initialize trainer
-    trainer = XGBoostTrainer(
+    trainer = QuantileRegressionTrainer(
         output_dir=args.output_dir,
         n_threads=args.n_threads,
-        num_rounds=args.num_rounds,
-        early_stopping_rounds=args.early_stopping_rounds,
-        **xgb_params,
+        quantile=args.quantile,
+        alphas=alphas,
+        solvers=solvers,
     )
 
     # Train models using cross-validation
@@ -86,7 +83,9 @@ def main():
     # save the feature importance
     trainer.save_feature_importance()
 
-    print("\nTraining completed successfully!")
+    print(
+        f"\nQuantile Regression (quantile={args.quantile}) model training completed successfully!"
+    )
     print(f"Results saved to: {args.output_dir}")
 
 

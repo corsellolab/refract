@@ -5,16 +5,10 @@ Regression models for analysis of PRISM multiplexed cell-line datasets.
 Nick Phillips (nphill22@stanford.edu)
 
 ## Overview 
-<div style="display: flex; justify-content: center; gap: 20px; margin: 20px 0;">
-  <div style="border: 1px solid #ccc; padding: 10px; text-align: center;">
-    <h3 style="text-align: left;">Predictive Modeling</h3>
-    <img src="assets/amg232_output/predictions_scatter.png" alt="Predictions Scatter Plot">
-  </div>
-  <div style="border: 1px solid #ccc; padding: 10px; text-align: center;">
-    <h3 style="text-align: left;">Feature Importance Analysis</h3>
-    <img src="assets/amg232_output/shap_summary.png" alt="SHAP Summary Plot">
-  </div>
-</div>
+| Predictive Modeling                                                                  | Feature Importance Analysis                                                     |
+| :----------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------: |
+| <img src="assets/amg232_output/predictions_scatter.png" width="400"> | <img src="assets/amg232_output/shap_summary.png" width="400"> |
+
 
 Refract is a workflow for predicting PRISM responses using mutivariable regression models. By interpreting these models, we can generate hypotheses of drug mechanism, revealing novel anti-cancer activity. The above example shows results for `AMG-232`, an MDM2 inhibitor. The responses are highly predictable, with a correlation of `0.78` between actual and estimated log fold change values. Feature analysis with SHAP reveals that cell lines with high dependency on MDM2 from CRISPR knockout screens and functional TP53 are sensitized to the drug. 
 

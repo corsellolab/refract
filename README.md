@@ -8,11 +8,11 @@ Nick Phillips (nphill22@stanford.edu)
 <div style="display: flex; justify-content: center; gap: 20px; margin: 20px 0;">
   <div style="border: 1px solid #ccc; padding: 10px; text-align: center;">
     <h3 style="text-align: left;">Predictive Modeling</h3>
-    <img src="assets/amg232_output/predictions_scatter.png" alt="Predictions Scatter Plot" style="width: 350px; height: auto; object-fit: contain;">
+    <img src="assets/amg232_output/predictions_scatter.png" alt="Predictions Scatter Plot">
   </div>
   <div style="border: 1px solid #ccc; padding: 10px; text-align: center;">
     <h3 style="text-align: left;">Feature Importance Analysis</h3>
-    <img src="assets/amg232_output/shap_summary.png" alt="SHAP Summary Plot" style="width: 300px; height: auto; object-fit: contain;">
+    <img src="assets/amg232_output/shap_summary.png" alt="SHAP Summary Plot">
   </div>
 </div>
 

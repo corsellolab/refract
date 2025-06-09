@@ -22,3 +22,9 @@ nextflow run main.nf -resume \
 --output_dir /drive3/nphill22/projects/corsello_lab/20250525_manuscript/data/output/full/secondary_screen \
 --response_dir /drive3/nphill22/projects/corsello_lab/20250525_manuscript/data/responses/full/secondary_screen \
 --feature_path_pkl /drive3/nphill22/projects/corsello_lab/20250525_manuscript/sherlock_copy/data/processed_features/x-all.pkl
+
+~/nextflow run main.nf -resume \
+--output_dir /drive3/nphill22/projects/corsello_lab/20250525_manuscript/data/output/full/genetic_ko \
+--response_dir /drive3/nphill22/projects/corsello_lab/20250525_manuscript/data/responses/full/genetic_ko \
+--feature_path_pkl /drive3/nphill22/projects/corsello_lab/20250525_manuscript/data/features/x-all-without-xpr.pkl
+

@@ -7,7 +7,7 @@ Nick Phillips (nphill22@stanford.edu)
 ## Overview 
 | Predictive Modeling                                                                  | Feature Importance Analysis                                                     |
 | :----------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------: |
-| <img src="assets/amg232_output/predictions_scatter.png" width="400"> | <img src="assets/amg232_output/shap_summary.png" width="400"> |
+| <img src="assets/amg232_predictions_scatter.png" width="400"> | <img src="assets/amg232_shap_summary.png" width="400"> |
 
 
 Refract is a workflow for predicting PRISM responses using mutivariable regression models. By interpreting these models, we can generate hypotheses of drug mechanism, revealing novel anti-cancer activity. The above example shows results for `AMG-232`, an MDM2 inhibitor. The responses are highly predictable, with a correlation of `0.78` between actual and estimated log fold change values. Feature analysis with SHAP reveals that cell lines with high dependency on MDM2 from CRISPR knockout screens and functional TP53 are sensitized to the drug. 
